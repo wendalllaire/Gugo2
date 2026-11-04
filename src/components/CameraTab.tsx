@@ -282,22 +282,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           ctx.fillStyle = 'rgba(16, 185, 129, 0.10)';
           ctx.fillRect(x, y, w, h);
 
-          const label = `${piece.label} (${piece.points} pts)`;
-          ctx.font = 'bold 13px system-ui, sans-serif';
-          const tw = ctx.measureText(label).width;
-          const badgeX = Math.max(4, Math.min(width - tw - 16, x));
-          const badgeY = Math.max(4, y - 24);
-
-          ctx.fillStyle = '#0f172a';
-          ctx.beginPath();
-          ctx.roundRect(badgeX, badgeY, tw + 14, 22, 6);
-          ctx.fill();
-          ctx.strokeStyle = '#10b981';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(label, badgeX + 7, badgeY + 15);
         }
       });
 
@@ -1056,9 +1040,19 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                   const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
                   const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
                   const isEditing = editingPieceId === piece.id;
-                  const badgeFontSize = Math.max(18, Math.min(42, Math.min(width, height) * 0.28));
-                  const badgeWidth = Math.max(34, badgeFontSize * (String(piece.points).length * 0.72 + 0.7));
-                  const badgeHeight = badgeFontSize * 1.35;
+                  const badgeFontSize = Math.max(16, Math.min(36, Math.min(width, height) * 0.22));
+                  const badgeWidth = Math.max(28, badgeFontSize * 1.25);
+                  const badgeHeight = badgeFontSize * 1.4;
+                  const isHorizontal = width >= height;
+                  const halfCenters = isHorizontal
+                    ? [
+                        { x: x + width * 0.25, y: y + height * 0.5, value: piece.sideA },
+                        { x: x + width * 0.75, y: y + height * 0.5, value: piece.sideB },
+                      ]
+                    : [
+                        { x: x + width * 0.5, y: y + height * 0.25, value: piece.sideA },
+                        { x: x + width * 0.5, y: y + height * 0.75, value: piece.sideB },
+                      ];
                   return (
                     <g key={piece.id}>
                       <rect
@@ -1074,7 +1068,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                         pointerEvents="all"
                         role="button"
                         tabIndex={0}
-                        aria-label={`Editar peça ${piece.label}, ${piece.points} pontos`}
+                        aria-label={`Editar peça ${piece.label}: ${piece.sideA} e ${piece.sideB}`}
                         aria-pressed={isEditing}
                         className="cursor-pointer"
                         onClick={() => handleStartPieceEdit(piece)}
@@ -1085,28 +1079,31 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                           }
                         }}
                       >
-                        <title>{`Editar ${piece.label} — ${piece.points} pontos`}</title>
+                        <title>{`Editar ${piece.label}: ${piece.sideA} e ${piece.sideB}`}</title>
                       </rect>
-                      <rect
-                        x={x + 2}
-                        y={y + 2}
-                        width={badgeWidth}
-                        height={badgeHeight}
-                        rx={Math.max(5, badgeFontSize * 0.22)}
-                        fill="rgba(20, 20, 20, 0.62)"
-                        pointerEvents="none"
-                      />
-                      <text
-                        x={x + 2 + badgeWidth / 2}
-                        y={y + 2 + badgeFontSize}
-                        textAnchor="middle"
-                        fontSize={badgeFontSize}
-                        fontFamily="Georgia, serif"
-                        fill="#fff8e8"
-                        pointerEvents="none"
-                      >
-                        {piece.points}
-                      </text>
+                      {halfCenters.map((half, halfIndex) => (
+                        <g key={halfIndex} pointerEvents="none">
+                          <rect
+                            x={half.x - badgeWidth / 2}
+                            y={half.y - badgeHeight / 2}
+                            width={badgeWidth}
+                            height={badgeHeight}
+                            rx={Math.max(5, badgeFontSize * 0.22)}
+                            fill="rgba(20, 20, 20, 0.72)"
+                          />
+                          <text
+                            x={half.x}
+                            y={half.y + badgeFontSize * 0.34}
+                            textAnchor="middle"
+                            fontSize={badgeFontSize}
+                            fontFamily="Georgia, serif"
+                            fontWeight="bold"
+                            fill="#fff8e8"
+                          >
+                            {half.value}
+                          </text>
+                        </g>
+                      ))}
                     </g>
                   );
                 })}
