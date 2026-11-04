@@ -510,16 +510,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     <div className="space-y-4 pb-20">
       {/* Header Banner */}
       <div className="rounded-2xl bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center text-xl backdrop-blur-xs">
-              <Camera className="w-5 h-5 text-white" />
-            </div>
-            <div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-end gap-1.5">
             {onOpenApkModal && (
               <button
                 type="button"
@@ -535,7 +526,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         </div>
 
         {/* Engine Selector Segmented Control */}
-        <div className="mt-3.5 pt-3 border-t border-white/20">
+        <div className="pt-0">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
             <span className="text-[11px] font-semibold text-emerald-100 flex items-center gap-1">
               <Zap className="w-3.5 h-3.5 text-amber-300" />
@@ -848,7 +839,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       )}
 
       {/* Camera / Viewfinder Box */}
-      <div className={streamActive ? "fixed inset-0 z-[100] h-[100dvh] w-screen overflow-hidden bg-black flex flex-col items-center justify-center" : "relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm aspect-4/3 flex flex-col items-center justify-center"}>
+      <div className={streamActive ? "fixed inset-0 z-[100] h-[100dvh] w-screen overflow-hidden bg-black flex flex-col items-center justify-center" : capturedImage ? "relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm aspect-4/3 flex flex-col items-center justify-center" : "hidden"}>
         {/* Live Video Feed */}
         <video
           ref={videoRef}
