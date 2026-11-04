@@ -26,8 +26,10 @@ test('offline CV never substitutes fabricated sample dominoes', () => {
   assert.match(source, /visionResult\.pieces\.length === 0 \|\| !selectedPlayerId/);
 });
 
-test('result summary exposes piece count and total hand score', () => {
-  assert.match(source, /visionResult\.pieces\.length === 1 \? 'peça' : 'peças'/);
+test('result summary keeps the total score without redundant engine and piece-count labels', () => {
+  assert.doesNotMatch(source, /Visão Offline Double-Double/);
+  assert.doesNotMatch(source, /Peças Catalogadas Individualmente/);
+  assert.doesNotMatch(source, /Total da Mão/);
   assert.match(source, /\{visionResult\.totalPoints\} pts/);
 });
 
