@@ -5,10 +5,7 @@ import {
   Trophy,
   Moon,
   Sun,
-  Code,
   Share2,
-  Smartphone,
-  Download,
 } from 'lucide-react';
 
 interface AndroidFrameProps {
@@ -16,8 +13,6 @@ interface AndroidFrameProps {
   onTabChange: (tab: TabType) => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
-  onOpenKotlinModal: () => void;
-  onOpenApkModal: () => void;
   onShare: () => void;
   currentRound: number;
   maxRounds: number;
@@ -29,8 +24,6 @@ export const AndroidFrame: React.FC<AndroidFrameProps> = ({
   onTabChange,
   isDarkMode,
   onToggleDarkMode,
-  onOpenKotlinModal,
-  onOpenApkModal,
   onShare,
   currentRound,
   maxRounds,
@@ -65,28 +58,6 @@ export const AndroidFrame: React.FC<AndroidFrameProps> = ({
           </div>
 
           <div className="flex items-center gap-1">
-            {/* APK Download Button for Mobile */}
-            <button
-              type="button"
-              onClick={onOpenApkModal}
-              title="Baixar APK de Testes"
-              aria-label="Baixar APK de Testes"
-              className="p-2 rounded-xl text-emerald-600 dark:text-emerald-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-
-            {/* Kotlin Code Button for Mobile */}
-            <button
-              type="button"
-              onClick={onOpenKotlinModal}
-              title="Ver Código Kotlin Jetpack Compose"
-              aria-label="Ver Código Kotlin Jetpack Compose"
-              className="sm:hidden p-2 rounded-xl text-emerald-600 dark:text-emerald-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-            >
-              <Code className="w-4 h-4" />
-            </button>
-
             {/* Dark Mode Toggle */}
             <button
               type="button"
