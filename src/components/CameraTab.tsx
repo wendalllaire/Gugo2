@@ -1011,11 +1011,61 @@ export const CameraTab: React.FC<CameraTabProps> = ({
 
         {/* Captured Image / CV Overlay View */}
         {capturedImage && !streamActive && (
-          <img
-            src={showOverlay && overlayImage ? overlayImage : capturedImage}
-            alt="Foto do conjunto de dominós processada"
-            className="absolute inset-0 w-full h-full object-contain bg-zinc-950"
-          />
+          <>
+            <img
+              src={showOverlay && overlayImage ? overlayImage : capturedImage}
+              alt="Foto do conjunto de dominós processada"
+              className="absolute inset-0 w-full h-full object-contain bg-zinc-950"
+            />
+            {visionResult && lastRawImageData && visionResult.pieces.some((piece) => piece.box2d) && (
+              <svg
+                aria-label="Peças detetadas. Toque numa peça para a editar."
+                role="group"
+                viewBox={`0 0 ${lastRawImageData.width} ${lastRawImageData.height}`}
+                preserveAspectRatio="xMidYMid meet"
+                className="absolute inset-0 z-[5] w-full h-full"
+              >
+                {visionResult.pieces.map((piece) => {
+                  if (!piece.box2d) return null;
+                  const [yMin, xMin, yMax, xMax] = piece.box2d;
+                  const x = (xMin / 1000) * lastRawImageData.width;
+                  const y = (yMin / 1000) * lastRawImageData.height;
+                  const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
+                  const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
+                  const isEditing = editingPieceId === piece.id;
+                  return (
+                    <rect
+                      key={piece.id}
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      rx={Math.max(4, Math.min(width, height) * 0.04)}
+                      fill={isEditing ? "rgba(245, 158, 11, 0.28)" : "rgba(16, 185, 129, 0.12)"}
+                      stroke={isEditing ? "#f59e0b" : "#34d399"}
+                      strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
+                      vectorEffect="non-scaling-stroke"
+                      pointerEvents="all"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Editar peça ${piece.label}`}
+                      aria-pressed={isEditing}
+                      className="cursor-pointer"
+                      onClick={() => handleStartPieceEdit(piece)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleStartPieceEdit(piece);
+                        }
+                      }}
+                    >
+                      <title>{`Editar ${piece.label} — ${piece.points} pontos`}</title>
+                    </rect>
+                  );
+                })}
+              </svg>
+            )}
+          </>
         )}
 
         {/* Toggle overlay badge when image is available */}
@@ -1202,7 +1252,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           {/* List of Detected Pieces with individual scores and INLINE EDITING */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-              <span>Peças Identificadas (Toque no lápis para alterar lados):</span>
+              <span>Peças Identificadas (toque na peça na imagem ou no lápis para editar):</span>
               <button
                 type="button"
                 onClick={() => setShowManualAdd(true)}
