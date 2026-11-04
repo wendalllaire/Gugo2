@@ -80,6 +80,59 @@ export const CameraTab: React.FC<CameraTabProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const [livePieces, setLivePieces] = useState<DetectedPiece[]>([]);
+  const [liveScanBusy, setLiveScanBusy] = useState(false);
+
+  // Lightweight, on-device preview recognition while the viewfinder is open.
+  // It deliberately uses offline CV (not Gemini/network) and samples a reduced frame
+  // periodically so it does not compete with the camera preview or shutter.
+  useEffect(() => {
+    if (!streamActive) {
+      setLivePieces([]);
+      setLiveScanBusy(false);
+      return;
+    }
+
+    let animationFrame = 0;
+    let lastScanAt = 0;
+    let cancelled = false;
+    const previewCanvas = document.createElement('canvas');
+    const previewContext = previewCanvas.getContext('2d', { willReadFrequently: true });
+
+    const scanFrame = (now: number) => {
+      if (cancelled) return;
+      animationFrame = window.requestAnimationFrame(scanFrame);
+
+      const video = videoRef.current;
+      if (!video || !previewContext || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+          !video.videoWidth || now - lastScanAt < 900) return;
+
+      lastScanAt = now;
+      const scale = Math.min(1, 640 / video.videoWidth);
+      previewCanvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      previewCanvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+
+      try {
+        previewContext.drawImage(video, 0, 0, previewCanvas.width, previewCanvas.height);
+        const frame = previewContext.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+        const result = detectDominoesOffline(frame.data, previewCanvas.width, previewCanvas.height, {
+          thresholdMode,
+          manualThreshold,
+          invertColors,
+        });
+        if (!cancelled) setLivePieces(result.pieces);
+      } catch (error) {
+        // A transient frame/camera error must never interrupt the live preview.
+        console.debug('Live domino preview skipped:', error);
+      }
+    };
+
+    animationFrame = window.requestAnimationFrame(scanFrame);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [streamActive, thresholdMode, manualThreshold, invertColors]);
 
   useEffect(() => {
     return () => {
@@ -1012,6 +1065,21 @@ export const CameraTab: React.FC<CameraTabProps> = ({
             </div>
             <div className="absolute top-6 right-5 z-30 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
               Câmara ativa
+            </div>
+            <div
+              className="absolute top-20 left-1/2 z-30 -translate-x-1/2 max-w-[90vw] rounded-2xl border border-white/25 bg-black/70 px-4 py-2 text-center text-white shadow-lg backdrop-blur-sm"
+              aria-live="polite"
+              aria-label={`Pré-contagem: ${livePieces.length} peças, ${livePieces.reduce((sum, piece) => sum + piece.points, 0)} pontos`}
+            >
+              <div className="text-sm font-black">
+                {livePieces.length} {livePieces.length === 1 ? 'peça' : 'peças'} · {livePieces.reduce((sum, piece) => sum + piece.points, 0)} pts
+              </div>
+              <div className="mt-0.5 max-w-full truncate text-[11px] font-semibold text-emerald-200">
+                {livePieces.length
+                  ? livePieces.map((piece) => `[${piece.sideA}|${piece.sideB}]`).join('  ')
+                  : 'A procurar dominós…'}
+              </div>
+              <div className="mt-0.5 text-[9px] text-white/65">Pré-contagem offline · confirma após fotografar</div>
             </div>
           </>
         )}
