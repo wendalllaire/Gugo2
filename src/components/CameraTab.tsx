@@ -80,6 +80,59 @@ export const CameraTab: React.FC<CameraTabProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const [livePieces, setLivePieces] = useState<DetectedPiece[]>([]);
+  const [liveScanBusy, setLiveScanBusy] = useState(false);
+
+  // Lightweight, on-device preview recognition while the viewfinder is open.
+  // It deliberately uses offline CV (not Gemini/network) and samples a reduced frame
+  // periodically so it does not compete with the camera preview or shutter.
+  useEffect(() => {
+    if (!streamActive) {
+      setLivePieces([]);
+      setLiveScanBusy(false);
+      return;
+    }
+
+    let animationFrame = 0;
+    let lastScanAt = 0;
+    let cancelled = false;
+    const previewCanvas = document.createElement('canvas');
+    const previewContext = previewCanvas.getContext('2d', { willReadFrequently: true });
+
+    const scanFrame = (now: number) => {
+      if (cancelled) return;
+      animationFrame = window.requestAnimationFrame(scanFrame);
+
+      const video = videoRef.current;
+      if (!video || !previewContext || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+          !video.videoWidth || now - lastScanAt < 900) return;
+
+      lastScanAt = now;
+      const scale = Math.min(1, 640 / video.videoWidth);
+      previewCanvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      previewCanvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+
+      try {
+        previewContext.drawImage(video, 0, 0, previewCanvas.width, previewCanvas.height);
+        const frame = previewContext.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+        const result = detectDominoesOffline(frame.data, previewCanvas.width, previewCanvas.height, {
+          thresholdMode,
+          manualThreshold,
+          invertColors,
+        });
+        if (!cancelled) setLivePieces(result.pieces);
+      } catch (error) {
+        // A transient frame/camera error must never interrupt the live preview.
+        console.debug('Live domino preview skipped:', error);
+      }
+    };
+
+    animationFrame = window.requestAnimationFrame(scanFrame);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [streamActive, thresholdMode, manualThreshold, invertColors]);
 
   useEffect(() => {
     return () => {
@@ -282,22 +335,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           ctx.fillStyle = 'rgba(16, 185, 129, 0.10)';
           ctx.fillRect(x, y, w, h);
 
-          const label = `${piece.label} (${piece.points} pts)`;
-          ctx.font = 'bold 13px system-ui, sans-serif';
-          const tw = ctx.measureText(label).width;
-          const badgeX = Math.max(4, Math.min(width - tw - 16, x));
-          const badgeY = Math.max(4, y - 24);
-
-          ctx.fillStyle = '#0f172a';
-          ctx.beginPath();
-          ctx.roundRect(badgeX, badgeY, tw + 14, 22, 6);
-          ctx.fill();
-          ctx.strokeStyle = '#10b981';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(label, badgeX + 7, badgeY + 15);
         }
       });
 
@@ -1029,6 +1066,21 @@ export const CameraTab: React.FC<CameraTabProps> = ({
             <div className="absolute top-6 right-5 z-30 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
               Câmara ativa
             </div>
+            <div
+              className="absolute top-20 left-1/2 z-30 -translate-x-1/2 max-w-[90vw] rounded-2xl border border-white/25 bg-black/70 px-4 py-2 text-center text-white shadow-lg backdrop-blur-sm"
+              aria-live="polite"
+              aria-label={`Pré-contagem: ${livePieces.length} peças, ${livePieces.reduce((sum, piece) => sum + piece.points, 0)} pontos`}
+            >
+              <div className="text-sm font-black">
+                {livePieces.length} {livePieces.length === 1 ? 'peça' : 'peças'} · {livePieces.reduce((sum, piece) => sum + piece.points, 0)} pts
+              </div>
+              <div className="mt-0.5 max-w-full truncate text-[11px] font-semibold text-emerald-200">
+                {livePieces.length
+                  ? livePieces.map((piece) => `[${piece.sideA}|${piece.sideB}]`).join('  ')
+                  : 'A procurar dominós…'}
+              </div>
+              <div className="mt-0.5 text-[9px] text-white/65">Pré-contagem offline · confirma após fotografar</div>
+            </div>
           </>
         )}
 
@@ -1056,9 +1108,19 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                   const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
                   const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
                   const isEditing = editingPieceId === piece.id;
-                  const badgeFontSize = Math.max(18, Math.min(42, Math.min(width, height) * 0.28));
-                  const badgeWidth = Math.max(34, badgeFontSize * (String(piece.points).length * 0.72 + 0.7));
-                  const badgeHeight = badgeFontSize * 1.35;
+                  const badgeFontSize = Math.max(16, Math.min(36, Math.min(width, height) * 0.22));
+                  const badgeWidth = Math.max(28, badgeFontSize * 1.25);
+                  const badgeHeight = badgeFontSize * 1.4;
+                  const isHorizontal = width >= height;
+                  const halfCenters = isHorizontal
+                    ? [
+                        { x: x + width * 0.25, y: y + height * 0.5, value: piece.sideA },
+                        { x: x + width * 0.75, y: y + height * 0.5, value: piece.sideB },
+                      ]
+                    : [
+                        { x: x + width * 0.5, y: y + height * 0.25, value: piece.sideA },
+                        { x: x + width * 0.5, y: y + height * 0.75, value: piece.sideB },
+                      ];
                   return (
                     <g key={piece.id}>
                       <rect
@@ -1074,7 +1136,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                         pointerEvents="all"
                         role="button"
                         tabIndex={0}
-                        aria-label={`Editar peça ${piece.label}, ${piece.points} pontos`}
+                        aria-label={`Editar peça ${piece.label}: ${piece.sideA} e ${piece.sideB}`}
                         aria-pressed={isEditing}
                         className="cursor-pointer"
                         onClick={() => handleStartPieceEdit(piece)}
@@ -1085,28 +1147,31 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                           }
                         }}
                       >
-                        <title>{`Editar ${piece.label} — ${piece.points} pontos`}</title>
+                        <title>{`Editar ${piece.label}: ${piece.sideA} e ${piece.sideB}`}</title>
                       </rect>
-                      <rect
-                        x={x + 2}
-                        y={y + 2}
-                        width={badgeWidth}
-                        height={badgeHeight}
-                        rx={Math.max(5, badgeFontSize * 0.22)}
-                        fill="rgba(20, 20, 20, 0.62)"
-                        pointerEvents="none"
-                      />
-                      <text
-                        x={x + 2 + badgeWidth / 2}
-                        y={y + 2 + badgeFontSize}
-                        textAnchor="middle"
-                        fontSize={badgeFontSize}
-                        fontFamily="Georgia, serif"
-                        fill="#fff8e8"
-                        pointerEvents="none"
-                      >
-                        {piece.points}
-                      </text>
+                      {halfCenters.map((half, halfIndex) => (
+                        <g key={halfIndex} pointerEvents="none">
+                          <rect
+                            x={half.x - badgeWidth / 2}
+                            y={half.y - badgeHeight / 2}
+                            width={badgeWidth}
+                            height={badgeHeight}
+                            rx={Math.max(5, badgeFontSize * 0.22)}
+                            fill="rgba(20, 20, 20, 0.72)"
+                          />
+                          <text
+                            x={half.x}
+                            y={half.y + badgeFontSize * 0.34}
+                            textAnchor="middle"
+                            fontSize={badgeFontSize}
+                            fontFamily="Georgia, serif"
+                            fontWeight="bold"
+                            fill="#fff8e8"
+                          >
+                            {half.value}
+                          </text>
+                        </g>
+                      ))}
                     </g>
                   );
                 })}

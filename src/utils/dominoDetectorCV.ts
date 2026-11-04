@@ -755,7 +755,7 @@ export function drawDominoCVOverlay(
 
   // Draw overlay for EACH detected domino piece individually
   for (const tile of cvResult.tiles) {
-    const { bbox, halfA, halfB, points, label } = tile;
+    const { bbox, halfA, halfB } = tile;
 
     // 1. Tile Bounding Box (Emerald Green)
     ctx.strokeStyle = '#10b981';
@@ -808,26 +808,6 @@ export function drawDominoCVOverlay(
     halfA.pips.forEach((p) => drawPip(p, '#34d399')); // light emerald
     halfB.pips.forEach((p) => drawPip(p, '#38bdf8')); // light sky blue
 
-    // 5. Piece Label Badge with individual points
-    const labelText = `${label} • ${points} pts`;
-    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
-    const textWidth = ctx.measureText(labelText).width;
-    const badgeW = textWidth + 14;
-    const badgeH = 22;
-    const badgeX = Math.max(4, Math.min(canvasWidth - badgeW - 4, bbox.x));
-    const badgeY = Math.max(4, bbox.y - badgeH - 3);
-
-    ctx.fillStyle = '#0f172a';
-    ctx.beginPath();
-    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
-    ctx.fill();
-
-    ctx.strokeStyle = '#10b981';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(labelText, badgeX + 7, badgeY + 15);
   }
 
   // Global CV Watermark / Metrics Badge
@@ -839,7 +819,7 @@ export function drawDominoCVOverlay(
   ctx.roundRect(10, 10, badgeW, 22, 6);
   ctx.fill();
   ctx.fillStyle = '#34d399';
-  ctx.fillText(cvBadgeText, 18, 25);
+  ctx.fillText(cvBadgeText, 18, 25, Math.max(0, canvasWidth - 26));
 
   ctx.restore();
 }
