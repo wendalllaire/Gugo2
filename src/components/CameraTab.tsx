@@ -1170,9 +1170,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                   const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
                   const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
                   const isEditing = editingPieceId === piece.id;
-                  const badgeFontSize = Math.max(16, Math.min(36, Math.min(width, height) * 0.22));
-                  const badgeWidth = Math.max(28, badgeFontSize * 1.25);
-                  const badgeHeight = badgeFontSize * 1.4;
                   const isHorizontal = width >= height;
                   const halfCenters = isHorizontal
                     ? [
