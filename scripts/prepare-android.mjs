@@ -63,16 +63,16 @@ let immersiveActivity = fs.readFileSync(activityPath, 'utf8');
 if (!immersiveActivity.includes('WindowInsetsControllerCompat')) {
   immersiveActivity = immersiveActivity.replace(
     'import androidx.core.content.ContextCompat;',
-    'import androidx.core.content.ContextCompat;\\n' +
-      'import androidx.core.view.WindowCompat;\\n' +
-      'import androidx.core.view.WindowInsetsCompat;\\n' +
+    'import androidx.core.content.ContextCompat;\n' +
+      'import androidx.core.view.WindowCompat;\n' +
+      'import androidx.core.view.WindowInsetsCompat;\n' +
       'import androidx.core.view.WindowInsetsControllerCompat;'
   );
   immersiveActivity = immersiveActivity.replace(
     'super.onCreate(savedInstanceState);',
-    'super.onCreate(savedInstanceState);\\n' +
-      '        WindowInsetsControllerCompat systemBars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());\\n' +
-      '        systemBars.hide(WindowInsetsCompat.Type.statusBars());\\n' +
+    'super.onCreate(savedInstanceState);\n' +
+      '        WindowInsetsControllerCompat systemBars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());\n' +
+      '        systemBars.hide(WindowInsetsCompat.Type.statusBars());\n' +
       '        systemBars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);'
   );
   fs.writeFileSync(activityPath, immersiveActivity);
