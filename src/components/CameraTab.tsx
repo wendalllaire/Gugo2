@@ -319,7 +319,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       // full-domino rectangle underneath the individual half-boxes.
 
       // Gemini Watermark
-      const badgeText = `🤖 IA Gemini Vision • ${pieces.length} peças catalogadas`;
+      const badgeText = `🤖 IA Gemini Vision • ${_pieces.length} peças catalogadas`;
       ctx.font = '11px system-ui, sans-serif';
       const badgeW = ctx.measureText(badgeText).width + 16;
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
