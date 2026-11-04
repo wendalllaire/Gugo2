@@ -998,16 +998,39 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       )}
 
       {/* Camera / Viewfinder Box */}
-      <div className="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm aspect-4/3 flex flex-col items-center justify-center">
+      <div className={streamActive ? "fixed inset-0 z-[100] h-[100dvh] w-screen overflow-hidden bg-black flex flex-col items-center justify-center" : "relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm aspect-4/3 flex flex-col items-center justify-center"}>
         {/* Live Video Feed */}
         <video
           ref={videoRef}
           playsInline
           muted
-          className={`absolute inset-0 w-full h-full object-cover ${
-            streamActive ? 'block' : 'hidden'
-          }`}
+          className={`absolute inset-0 w-full h-full ${streamActive ? 'object-cover block' : 'object-cover hidden'}`}
         />
+        {streamActive && (
+          <>
+            <button
+              type="button"
+              onClick={stopCamera}
+              aria-label="Fechar câmara"
+              className="absolute top-5 left-5 z-30 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm border border-white/30"
+            >
+              <span aria-hidden="true" className="text-2xl leading-none">×</span>
+            </button>
+            <div className="absolute bottom-8 left-0 right-0 z-30 flex justify-center">
+              <button
+                type="button"
+                onClick={handleCaptureSnapshot}
+                aria-label="Tirar fotografia"
+                className="flex h-[76px] w-[76px] items-center justify-center rounded-full border-[5px] border-white bg-white/25 shadow-xl active:scale-95 transition-transform"
+              >
+                <span className="h-[56px] w-[56px] rounded-full bg-white" />
+              </button>
+            </div>
+            <div className="absolute top-6 right-5 z-30 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
+              Câmara ativa
+            </div>
+          </>
+        )}
 
         {/* Captured Image / CV Overlay View */}
         {capturedImage && !streamActive && (
@@ -1033,36 +1056,74 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                   const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
                   const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
                   const isEditing = editingPieceId === piece.id;
+                  const badgeFontSize = Math.max(18, Math.min(42, Math.min(width, height) * 0.28));
+                  const badgeWidth = Math.max(34, badgeFontSize * (String(piece.points).length * 0.72 + 0.7));
+                  const badgeHeight = badgeFontSize * 1.35;
                   return (
-                    <rect
-                      key={piece.id}
-                      x={x}
-                      y={y}
-                      width={width}
-                      height={height}
-                      rx={Math.max(4, Math.min(width, height) * 0.04)}
-                      fill={isEditing ? "rgba(245, 158, 11, 0.28)" : "rgba(16, 185, 129, 0.12)"}
-                      stroke={isEditing ? "#f59e0b" : "#34d399"}
-                      strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
-                      vectorEffect="non-scaling-stroke"
-                      pointerEvents="all"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Editar peça ${piece.label}`}
-                      aria-pressed={isEditing}
-                      className="cursor-pointer"
-                      onClick={() => handleStartPieceEdit(piece)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          handleStartPieceEdit(piece);
-                        }
-                      }}
-                    >
-                      <title>{`Editar ${piece.label} — ${piece.points} pontos`}</title>
-                    </rect>
+                    <g key={piece.id}>
+                      <rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={height}
+                        rx={Math.max(4, Math.min(width, height) * 0.04)}
+                        fill={isEditing ? "rgba(245, 158, 11, 0.28)" : "rgba(16, 185, 129, 0.12)"}
+                        stroke={isEditing ? "#f59e0b" : "#4faaa7"}
+                        strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
+                        vectorEffect="non-scaling-stroke"
+                        pointerEvents="all"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Editar peça ${piece.label}, ${piece.points} pontos`}
+                        aria-pressed={isEditing}
+                        className="cursor-pointer"
+                        onClick={() => handleStartPieceEdit(piece)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleStartPieceEdit(piece);
+                          }
+                        }}
+                      >
+                        <title>{`Editar ${piece.label} — ${piece.points} pontos`}</title>
+                      </rect>
+                      <rect
+                        x={x + 2}
+                        y={y + 2}
+                        width={badgeWidth}
+                        height={badgeHeight}
+                        rx={Math.max(5, badgeFontSize * 0.22)}
+                        fill="rgba(20, 20, 20, 0.62)"
+                        pointerEvents="none"
+                      />
+                      <text
+                        x={x + 2 + badgeWidth / 2}
+                        y={y + 2 + badgeFontSize}
+                        textAnchor="middle"
+                        fontSize={badgeFontSize}
+                        fontFamily="Georgia, serif"
+                        fill="#fff8e8"
+                        pointerEvents="none"
+                      >
+                        {piece.points}
+                      </text>
+                    </g>
                   );
                 })}
+                <text
+                  x={lastRawImageData.width / 2}
+                  y={lastRawImageData.height - Math.max(24, lastRawImageData.height * 0.035)}
+                  textAnchor="middle"
+                  fontSize={Math.max(28, Math.min(58, lastRawImageData.width * 0.045))}
+                  fontFamily="Georgia, serif"
+                  fill="#f5e8c2"
+                  stroke="rgba(0, 0, 0, 0.72)"
+                  strokeWidth="5"
+                  paintOrder="stroke"
+                  pointerEvents="none"
+                >
+                  Soma: {visionResult.totalPoints}
+                </text>
               </svg>
             )}
           </>
@@ -1138,7 +1199,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       )}
 
       {/* Action Buttons Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div className={`grid grid-cols-2 sm:grid-cols-5 gap-2 ${streamActive ? 'hidden' : ''}`}>
         {!streamActive ? (
           <button
             type="button"
