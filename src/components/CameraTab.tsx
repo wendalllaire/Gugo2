@@ -523,7 +523,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
               </button>
             )}
           </div>
-        </div>
 
         {/* Engine Selector Segmented Control */}
         <div className="pt-0">
