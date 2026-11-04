@@ -46,5 +46,20 @@ test('image hit areas use normalized detected bounding boxes and highlight the a
   assert.match(source, /const x = \(xMin \/ 1000\) \* lastRawImageData\.width/);
   assert.match(source, /const y = \(yMin \/ 1000\) \* lastRawImageData\.height/);
   assert.match(source, /editingPieceId === piece\.id/);
-  assert.match(source, /isEditing \? "#f59e0b" : "#34d399"/);
+  assert.match(source, /isEditing \? "#f59e0b" : "#4faaa7"/);
+});
+
+
+test('live camera opens as a fullscreen viewfinder with capture and close controls', () => {
+  assert.match(source, /fixed inset-0 z-\[100\] h-\[100dvh\] w-screen/);
+  assert.match(source, /aria-label="Fechar câmara"/);
+  assert.match(source, /aria-label="Tirar fotografia"/);
+  assert.match(source, /streamActive \? 'hidden' : ''/);
+});
+
+test('captured domino overlay shows each piece score and the total sum', () => {
+  assert.match(source, /const badgeFontSize =/);
+  assert.match(source, /\{piece\.points\}/);
+  assert.match(source, /Soma: \{visionResult\.totalPoints\}/);
+  assert.match(source, /stroke="#4faaa7"/);
 });
