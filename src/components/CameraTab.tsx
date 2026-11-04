@@ -300,7 +300,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
    */
   const drawGeminiOverlay = (
     originalDataUrl: string,
-    pieces: DetectedPiece[],
+    _pieces: DetectedPiece[],
     width: number,
     height: number
   ) => {
@@ -314,29 +314,9 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     baseImg.onload = () => {
       ctx.drawImage(baseImg, 0, 0, width, height);
 
-      pieces.forEach((piece) => {
-        let x = 0;
-        let y = 0;
-        let w = 0;
-        let h = 0;
-
-        if (piece.box2d && piece.box2d.length === 4) {
-          const [ymin, xmin, ymax, xmax] = piece.box2d;
-          x = (xmin / 1000) * width;
-          y = (ymin / 1000) * height;
-          w = ((xmax - xmin) / 1000) * width;
-          h = ((ymax - ymin) / 1000) * height;
-        }
-
-        if (w > 0 && h > 0) {
-          ctx.strokeStyle = '#10b981';
-          ctx.lineWidth = 3;
-          ctx.strokeRect(x, y, w, h);
-          ctx.fillStyle = 'rgba(16, 185, 129, 0.10)';
-          ctx.fillRect(x, y, w, h);
-
-        }
-      });
+      // The SVG layer draws a separate contour and value for each half.
+      // Keep this canvas for the Gemini watermark only, avoiding a duplicate
+      // full-domino rectangle underneath the individual half-boxes.
 
       // Gemini Watermark
       const badgeText = `🤖 IA Gemini Vision • ${pieces.length} peças catalogadas`;
