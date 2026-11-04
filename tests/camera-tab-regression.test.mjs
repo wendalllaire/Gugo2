@@ -58,14 +58,28 @@ test('live camera opens as a fullscreen viewfinder with capture and close contro
   assert.match(source, /streamActive \? 'hidden' : ''/);
 });
 
-test('captured domino overlay shows each piece score and the total sum', () => {
-  assert.match(source, /const badgeFontSize =/);
+test('captured domino overlay outlines and labels each individual half', () => {
   assert.match(source, /value: piece\.sideA/);
   assert.match(source, /value: piece\.sideB/);
+  assert.match(source, /const halfWidth = isHorizontal \? width \/ 2 : width/);
+  assert.match(source, /const halfHeight = isHorizontal \? height : height \/ 2/);
+  assert.match(source, /x={halfX \+ 1}/);
+  assert.match(source, /y={halfY \+ 1}/);
+  assert.match(source, /x={halfX \+ labelPadding}/);
   assert.match(source, /\{half\.value\}/);
   assert.match(source, /Soma: \{visionResult\.totalPoints\}/);
   assert.doesNotMatch(source, /\{piece\.points\}/, 'the image must not show the per-piece sum badge');
   assert.match(source, /stroke="#4faaa7"/);
+});
+
+test('live camera keeps the summary badge and adds a contour and value to each half', () => {
+  assert.match(source, /Pré-contagem offline · confirma após fotografar/);
+  assert.match(source, /aria-label="Pré-contagem visual: cada metade do dominó está contornada e identificada"/);
+  assert.match(source, /preserveAspectRatio="xMidYMid slice"/);
+  assert.match(source, /livePieces\.map\(\(piece\) =>/);
+  assert.match(source, /\[piece\.sideA, piece\.sideB\]/);
+  assert.match(source, /stroke="#4faaa7"/);
+  assert.match(source, /\{value\}/);
 });
 
 
