@@ -11,7 +11,6 @@ import {
   Camera,
   Upload,
   RefreshCw,
-  Sparkles,
   Check,
   AlertCircle,
   Plus,
@@ -436,168 +435,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     }
   };
 
-  /**
-   * Generates realistic multi-domino synthetic test images.
-   */
-  const handleUseSample = (type: 'hand42' | 'hand52' | 'hand15') => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 680;
-    canvas.height = 420;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Dark green felt table
-    ctx.fillStyle = '#152e22';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Subtle table felt texture/border
-    ctx.strokeStyle = '#234e3b';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
-
-    if (type === 'hand42') {
-      // 3 Dominoes: [12|9] = 21, [4|7] = 11, [5|5] = 10 -> Total 42 pts
-      drawSyntheticDomino(ctx, 50, 70, 150, 270, 12, 9);
-      drawSyntheticDomino(ctx, 260, 70, 150, 270, 4, 7);
-      drawSyntheticDomino(ctx, 470, 70, 150, 270, 5, 5);
-    } else if (type === 'hand52') {
-      // 5 Dominoes: [12|8] = 20, [9|9] = 18, [7|3] = 10, [2|4] = 6, [0|0] = 0 -> Total 54 pts
-      drawSyntheticDomino(ctx, 35, 75, 105, 195, 12, 8);
-      drawSyntheticDomino(ctx, 160, 75, 105, 195, 9, 9);
-      drawSyntheticDomino(ctx, 285, 75, 105, 195, 7, 3);
-      drawSyntheticDomino(ctx, 410, 75, 105, 195, 2, 4);
-      drawSyntheticDomino(ctx, 535, 75, 105, 195, 0, 0);
-    } else {
-      // 2 Dominoes: [2|3] = 5, [1|9] = 10 -> Total 15 pts
-      drawSyntheticDomino(ctx, 140, 80, 160, 280, 2, 3);
-      drawSyntheticDomino(ctx, 380, 80, 160, 280, 1, 9);
-    }
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    setCapturedImage(dataUrl);
-    stopCamera();
-
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setLastRawImageData({ width: canvas.width, height: canvas.height, data: imgData.data });
-    processImage(dataUrl, imgData.data, canvas.width, canvas.height);
-  };
-
-  const drawSyntheticDomino = (
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    sideA: number,
-    sideB: number
-  ) => {
-    // Ivory body with bevel
-    ctx.fillStyle = '#fafaf9';
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, 14);
-    ctx.fill();
-    ctx.strokeStyle = '#d4d4d8';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // Central metal pin / divider
-    ctx.strokeStyle = '#52525b';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x + 8, y + h / 2);
-    ctx.lineTo(x + w - 8, y + h / 2);
-    ctx.stroke();
-
-    // Metal rivet in center
-    ctx.fillStyle = '#71717a';
-    ctx.beginPath();
-    ctx.arc(x + w / 2, y + h / 2, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    const drawPipsGroup = (count: number, isTop: boolean) => {
-      if (count === 0) return;
-      const centerY = isTop ? y + h / 4 : y + (3 * h) / 4;
-      const centerX = x + w / 2;
-      const r = Math.max(3.5, Math.min(6, w * 0.045));
-      ctx.fillStyle = isTop ? '#0f172a' : '#1d4ed8';
-
-      const dX = w * 0.23;
-      const dY = h * 0.11;
-
-      if (count === 1) {
-        ctx.beginPath(); ctx.arc(centerX, centerY, r, 0, Math.PI * 2); ctx.fill();
-      } else if (count === 2) {
-        ctx.beginPath(); ctx.arc(centerX - dX, centerY - dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX + dX, centerY + dY, r, 0, Math.PI * 2); ctx.fill();
-      } else if (count === 3) {
-        ctx.beginPath(); ctx.arc(centerX - dX, centerY - dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX, centerY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX + dX, centerY + dY, r, 0, Math.PI * 2); ctx.fill();
-      } else if (count === 4) {
-        ctx.beginPath(); ctx.arc(centerX - dX, centerY - dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX + dX, centerY - dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX - dX, centerY + dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX + dX, centerY + dY, r, 0, Math.PI * 2); ctx.fill();
-      } else if (count === 5) {
-        ctx.beginPath(); ctx.arc(centerX - dX, centerY - dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX + dX, centerY - dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX, centerY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX - dX, centerY + dY, r, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(centerX + dX, centerY + dY, r, 0, Math.PI * 2); ctx.fill();
-      } else {
-        const rows = count <= 6 ? 3 : 4;
-        const cols = count <= 6 ? 2 : 3;
-        let drawn = 0;
-        for (let rIdx = 0; rIdx < rows; rIdx++) {
-          for (let cIdx = 0; cIdx < cols; cIdx++) {
-            if (drawn < count) {
-              const px = centerX - dX + (cIdx * (2 * dX)) / Math.max(1, cols - 1);
-              const py = centerY - dY + (rIdx * (2 * dY)) / Math.max(1, rows - 1);
-              ctx.beginPath();
-              ctx.arc(px, py, r, 0, Math.PI * 2);
-              ctx.fill();
-              drawn++;
-            }
-          }
-        }
-      }
-    };
-
-    drawPipsGroup(sideA, true);
-    drawPipsGroup(sideB, false);
-  };
-
-  // Add piece manually to current count
-  const handleAddManualPiece = () => {
-    const a = Math.min(manualA, manualB);
-    const b = Math.max(manualA, manualB);
-    const newPiece: DetectedPiece = {
-      id: `manual-add-${Date.now()}`,
-      sideA: a,
-      sideB: b,
-      points: a + b,
-      label: `[${a}|${b}]`,
-      confidence: 1.0,
-    };
-
-    if (visionResult) {
-      const updated = [...visionResult.pieces, newPiece];
-      const total = updated.reduce((sum, p) => sum + p.points, 0);
-      setVisionResult({
-        ...visionResult,
-        pieces: updated,
-        totalPoints: total,
-      });
-    } else {
-      setVisionResult({
-        pieces: [newPiece],
-        totalPoints: newPiece.points,
-        source: 'manual',
-      });
-    }
-    setShowManualAdd(false);
-  };
-
   // Start individual piece editing
   const handleStartPieceEdit = (piece: DetectedPiece) => {
     setEditingPieceId(piece.id);
@@ -679,10 +516,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
               <Camera className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-base font-bold leading-tight">Contagem e Reconhecimento Multi-Peças</h2>
-              <p className="text-xs text-emerald-100">
-                Lê o conjunto completo e cataloga peça por peça
-              </p>
             </div>
           </div>
 
@@ -1273,21 +1106,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           </div>
         )}
 
-        {/* Idle View when no camera and no photo */}
-        {!streamActive && !capturedImage && (
-          <div className="text-center p-6 space-y-3 z-1">
-            <div className="w-16 h-16 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center mx-auto text-zinc-400">
-              <Camera className="w-8 h-8" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-white">Fotografar Conjunto de Peças</h3>
-              <p className="text-xs text-zinc-400 max-w-xs mt-1">
-                Reconhece múltiplas peças no tabuleiro e cataloga individualmente cada dominó com sua pontuação.
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* Viewfinder Target Guidelines */}
         {(streamActive || capturedImage) && (
           <div className="absolute inset-4 pointer-events-none border-2 border-white/20 rounded-xl flex flex-col justify-between p-2">
@@ -1359,33 +1177,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           <span>Escolher da Galeria</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => handleUseSample('hand42')}
-          className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-semibold text-xs border border-emerald-200 dark:border-emerald-800 transition-all"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>3 Peças (42 pts)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleUseSample('hand52')}
-          className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/50 dark:hover:bg-teal-900/50 text-teal-700 dark:text-teal-300 font-semibold text-xs border border-teal-200 dark:border-teal-800 transition-all"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>5 Peças (54 pts)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleUseSample('hand15')}
-          className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-xs border border-zinc-200 dark:border-zinc-700 transition-all"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>2 Peças (15 pts)</span>
-        </button>
-
         <input
           ref={fileInputRef}
           type="file"
@@ -1399,38 +1190,10 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       {/* Detection Results & Scores Breakdown with Individual Editing */}
       {visionResult && (
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm space-y-4">
-          {/* Header Summary */}
-          <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                  {visionResult.source === 'gemini_vision' ? (
-                    <>
-                      <Bot className="w-3.5 h-3.5 text-sky-500" />
-                      <span>Catálogo IA Gemini</span>
-                    </>
-                  ) : (
-                    <>
-                      <Cpu className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>Visão Offline Double-Double</span>
-                    </>
-                  )}
-                  {visionResult.timingMs ? ` (${visionResult.timingMs}ms)` : ''}
-                </span>
-              </div>
-              <h3 className="text-base font-extrabold text-zinc-900 dark:text-zinc-100">
-                {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'Peça Catalogada' : 'Peças Catalogadas Individualmente'}
-              </h3>
-            </div>
-
-            {/* Total Accumulated Score */}
-            <div className="flex flex-col items-end">
-              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'peça' : 'peças'} · Total da Mão
-              </span>
-              <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
-                {visionResult.totalPoints} pts
-              </div>
+          {/* Total score only; recognition metadata and redundant piece-count labels are hidden. */}
+          <div className="flex justify-end border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
+              {visionResult.totalPoints} pts
             </div>
           </div>
 
