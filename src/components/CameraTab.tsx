@@ -17,7 +17,6 @@ import {
   Trash2,
   Edit2,
   Calculator,
-  Smartphone,
   Eye,
   SlidersHorizontal,
   Cpu,
@@ -29,14 +28,12 @@ interface CameraTabProps {
   players: Player[];
   currentRound: number;
   onAssignScore: (playerId: string, score: number, pieces?: DominoTile[]) => void;
-  onOpenApkModal?: () => void;
 }
 
 export const CameraTab: React.FC<CameraTabProps> = ({
   players,
   currentRound,
   onAssignScore,
-  onOpenApkModal,
 }) => {
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -510,20 +507,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     <div className="space-y-4 pb-20">
       {/* Header Banner */}
       <div className="rounded-2xl bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-4 shadow-sm">
-        <div className="flex items-center justify-end gap-1.5">
-            {onOpenApkModal && (
-              <button
-                type="button"
-                onClick={onOpenApkModal}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-800 rounded-full font-bold text-[11px] shadow-xs transition-colors"
-                title="Baixar APK ou Instalar no Android"
-              >
-                <Smartphone className="w-3 h-3" />
-                <span>Baixar APK</span>
-              </button>
-            )}
-          </div>
-
         {/* Engine Selector Segmented Control */}
         <div className="pt-0">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
