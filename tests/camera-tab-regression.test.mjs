@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../src/components/CameraTab.tsx', import.meta.url), 'utf8');
+const detectorSource = readFileSync(new URL('../src/utils/dominoDetectorCV.ts', import.meta.url), 'utf8');
 
 test('gallery picker accepts images without forcing the camera', () => {
   assert.match(source, /accept="image\/jpeg,image\/png,image\/webp,image\/heic,image\/heif"/);
@@ -59,7 +60,17 @@ test('live camera opens as a fullscreen viewfinder with capture and close contro
 
 test('captured domino overlay shows each piece score and the total sum', () => {
   assert.match(source, /const badgeFontSize =/);
-  assert.match(source, /\{piece\.points\}/);
+  assert.match(source, /value: piece\.sideA/);
+  assert.match(source, /value: piece\.sideB/);
+  assert.match(source, /\{half\.value\}/);
   assert.match(source, /Soma: \{visionResult\.totalPoints\}/);
+  assert.doesNotMatch(source, /\{piece\.points\}/, 'the image must not show the per-piece sum badge');
   assert.match(source, /stroke="#4faaa7"/);
+});
+
+
+test('offline image overlay does not draw a duplicate per-piece total label', () => {
+  assert.doesNotMatch(detectorSource, /const labelText = `\$\{label\} • \$\{points\} pts`/);
+  assert.match(detectorSource, /halfA\.pips\.forEach/);
+  assert.match(detectorSource, /halfB\.pips\.forEach/);
 });
