@@ -1147,7 +1147,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       )}
 
       {/* Action Buttons Bar */}
-      <div className={`grid grid-cols-2 sm:grid-cols-5 gap-2 ${streamActive ? 'hidden' : ''}`}>
+      <div className={`grid grid-cols-2 sm:grid-cols-2 gap-2 ${streamActive ? 'hidden' : ''}`}>
         {!streamActive ? (
           <button
             type="button"
