@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Dominó Mexicano - Contagem, Visão & Ranking</title>
+    <meta name="description" content="App Android Jetpack Compose para Dominó Mexicano com visão computacional via câmera, adição manual e edição individual de peças, e ranking em tempo real para 2 a 10 jogadores." />
+    <meta property="og:title" content="Dominó Mexicano - Contagem, Visão & Ranking" />
+    <meta property="og:description" content="App Android Jetpack Compose para Dominó Mexicano com visão computacional via câmera, adição manual e edição individual de peças, e ranking em tempo real para 2 a 10 jogadores." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#059669" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Dominó" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <script>
+      // Suppress benign Vite HMR WebSocket disconnection errors per platform guidelines
+      window.addEventListener('error', function (event) {
+        if (event && (
+          (event.message && (event.message.includes('WebSocket') || event.message.includes('@vite/client'))) ||
+          (event.filename && event.filename.includes('@vite/client'))
+        )) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function (event) {
+        const reason = event && event.reason;
+        const msg = String(reason?.message || reason || '');
+        const stack = String(reason?.stack || '');
+        if (msg.includes('WebSocket') || msg.includes('@vite/client') || stack.includes('@vite/client')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

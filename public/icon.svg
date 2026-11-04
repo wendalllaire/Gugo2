@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+    <linearGradient id="tileGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f3f4f6"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded rect -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Train track icon in background -->
+  <path d="M 64 420 L 448 420" stroke="#10b981" stroke-width="12" stroke-linecap="round" opacity="0.3"/>
+  <path d="M 64 450 L 448 450" stroke="#10b981" stroke-width="12" stroke-linecap="round" opacity="0.3"/>
+  <line x1="120" y1="410" x2="120" y2="460" stroke="#10b981" stroke-width="8" opacity="0.3"/>
+  <line x1="200" y1="410" x2="200" y2="460" stroke="#10b981" stroke-width="8" opacity="0.3"/>
+  <line x1="280" y1="410" x2="280" y2="460" stroke="#10b981" stroke-width="8" opacity="0.3"/>
+  <line x1="360" y1="410" x2="360" y2="460" stroke="#10b981" stroke-width="8" opacity="0.3"/>
+
+  <!-- Domino Tile Body (6 | 6 Double Domino) -->
+  <g filter="url(#shadow)">
+    <rect x="136" y="56" width="240" height="380" rx="28" fill="url(#tileGrad)" stroke="#e5e7eb" stroke-width="6"/>
+    
+    <!-- Central Divider Groove -->
+    <line x1="156" y1="246" x2="356" y2="246" stroke="#9ca3af" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- Pips Top Half (6 pips) -->
+    <!-- Row 1 -->
+    <circle cx="186" cy="100" r="14" fill="#1e293b"/>
+    <circle cx="256" cy="100" r="14" fill="#1e293b"/>
+    <circle cx="326" cy="100" r="14" fill="#1e293b"/>
+    <!-- Row 2 -->
+    <circle cx="186" cy="190" r="14" fill="#1e293b"/>
+    <circle cx="256" cy="190" r="14" fill="#1e293b"/>
+    <circle cx="326" cy="190" r="14" fill="#1e293b"/>
+
+    <!-- Pips Bottom Half (5 pips with center) -->
+    <circle cx="186" cy="290" r="14" fill="#2563eb"/>
+    <circle cx="326" cy="290" r="14" fill="#2563eb"/>
+    <circle cx="256" cy="340" r="14" fill="#dc2626"/>
+    <circle cx="186" cy="390" r="14" fill="#2563eb"/>
+    <circle cx="326" cy="390" r="14" fill="#2563eb"/>
+  </g>
+
+  <!-- Modern CV Optical Camera Aperture Indicator Badge -->
+  <g transform="translate(340, 340)">
+    <circle cx="48" cy="48" r="44" fill="#0f172a" stroke="#10b981" stroke-width="4"/>
+    <!-- Lens camera symbol -->
+    <circle cx="48" cy="48" r="22" fill="#10b981"/>
+    <circle cx="48" cy="48" r="12" fill="#0f172a"/>
+    <circle cx="44" cy="44" r="4" fill="#34d399"/>
+  </g>
+</svg>

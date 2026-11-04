@@ -1,0 +1,8 @@
+{
+  "name": "Dominó Mexicano - Contagem, Visão & Ranking",
+  "description": "App Android Jetpack Compose para Dominó Mexicano com visão computacional via câmera, adição manual e edição individual de peças, e ranking em tempo real para 2 a 10 jogadores.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
