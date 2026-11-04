@@ -667,7 +667,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
             />
             {visionResult && lastRawImageData && visionResult.pieces.some((piece) => piece.box2d) && (
               <svg
-                aria-label="Peças detetadas. Toque numa peça para a editar."
+                aria-label="Peças detetadas. Toque duas vezes numa peça para abrir o editor."
                 role="group"
                 viewBox={`0 0 ${lastRawImageData.width} ${lastRawImageData.height}`}
                 preserveAspectRatio="xMidYMid meet"
@@ -909,7 +909,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           {/* List of Detected Pieces with individual scores and INLINE EDITING */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-              <span>Peças Identificadas (toque na peça na imagem ou no lápis para editar):</span>
+              <span>Peças Identificadas (toque duas vezes na peça da imagem para abrir o editor):</span>
               <button
                 type="button"
                 onClick={() => setShowManualAdd(true)}
@@ -988,7 +988,17 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                       /* Normal View with Edit/Remove buttons */
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <DominoPiece sideA={piece.sideA} sideB={piece.sideB} size="sm" />
+                          <div
+                                className="cursor-pointer"
+                                title="Toque duas vezes para abrir o editor"
+                                onDoubleClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleOpenPieceEditorPopup(piece);
+                                }}
+                              >
+                                <DominoPiece sideA={piece.sideA} sideB={piece.sideB} size="sm" />
+                              </div>
                           <div>
                             <div className="flex items-center gap-1.5">
                               <span className="text-[11px] font-black text-zinc-400">#{index + 1}</span>
