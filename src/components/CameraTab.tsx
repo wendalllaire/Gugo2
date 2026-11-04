@@ -300,7 +300,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
    */
   const drawGeminiOverlay = (
     originalDataUrl: string,
-    pieces: DetectedPiece[],
+    _pieces: DetectedPiece[],
     width: number,
     height: number
   ) => {
@@ -314,32 +314,12 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     baseImg.onload = () => {
       ctx.drawImage(baseImg, 0, 0, width, height);
 
-      pieces.forEach((piece) => {
-        let x = 0;
-        let y = 0;
-        let w = 0;
-        let h = 0;
-
-        if (piece.box2d && piece.box2d.length === 4) {
-          const [ymin, xmin, ymax, xmax] = piece.box2d;
-          x = (xmin / 1000) * width;
-          y = (ymin / 1000) * height;
-          w = ((xmax - xmin) / 1000) * width;
-          h = ((ymax - ymin) / 1000) * height;
-        }
-
-        if (w > 0 && h > 0) {
-          ctx.strokeStyle = '#10b981';
-          ctx.lineWidth = 3;
-          ctx.strokeRect(x, y, w, h);
-          ctx.fillStyle = 'rgba(16, 185, 129, 0.10)';
-          ctx.fillRect(x, y, w, h);
-
-        }
-      });
+      // The SVG layer draws a separate contour and value for each half.
+      // Keep this canvas for the Gemini watermark only, avoiding a duplicate
+      // full-domino rectangle underneath the individual half-boxes.
 
       // Gemini Watermark
-      const badgeText = `🤖 IA Gemini Vision • ${pieces.length} peças catalogadas`;
+      const badgeText = `🤖 IA Gemini Vision • ${_pieces.length} peças catalogadas`;
       ctx.font = '11px system-ui, sans-serif';
       const badgeW = ctx.measureText(badgeText).width + 16;
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
@@ -1081,6 +1061,68 @@ export const CameraTab: React.FC<CameraTabProps> = ({
               </div>
               <div className="mt-0.5 text-[9px] text-white/65">Pré-contagem offline · confirma após fotografar</div>
             </div>
+            {livePieces.length > 0 && videoRef.current?.videoWidth && videoRef.current?.videoHeight && (
+              <svg
+                aria-label="Pré-contagem visual: cada metade do dominó está contornada e identificada"
+                viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
+                preserveAspectRatio="xMidYMid slice"
+                className="absolute inset-0 z-20 h-full w-full pointer-events-none"
+              >
+                {livePieces.map((piece) => {
+                  if (!piece.box2d) return null;
+                  const [yMin, xMin, yMax, xMax] = piece.box2d;
+                  const px = (xMin / 1000) * videoRef.current!.videoWidth;
+                  const py = (yMin / 1000) * videoRef.current!.videoHeight;
+                  const pw = ((xMax - xMin) / 1000) * videoRef.current!.videoWidth;
+                  const ph = ((yMax - yMin) / 1000) * videoRef.current!.videoHeight;
+                  const horizontal = pw >= ph;
+                  return [piece.sideA, piece.sideB].map((value, index) => {
+                    const hx = horizontal ? px + (index * pw) / 2 : px;
+                    const hy = horizontal ? py : py + (index * ph) / 2;
+                    const hw = horizontal ? pw / 2 : pw;
+                    const hh = horizontal ? ph : ph / 2;
+                    const fontSize = Math.max(16, Math.min(34, Math.min(hw, hh) * 0.24));
+                    const pad = Math.max(5, fontSize * 0.22);
+                    const labelWidth = Math.max(fontSize * 1.05, String(value).length * fontSize * 0.68 + pad * 2);
+                    const labelHeight = fontSize * 1.35;
+                    return (
+                      <g key={`${piece.id}-half-${index}`}>
+                        <rect
+                          x={hx + 1}
+                          y={hy + 1}
+                          width={Math.max(0, hw - 2)}
+                          height={Math.max(0, hh - 2)}
+                          rx={Math.max(4, Math.min(hw, hh) * 0.045)}
+                          fill="rgba(16, 185, 129, 0.07)"
+                          stroke="#4faaa7"
+                          strokeWidth="4"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <rect
+                          x={hx + pad}
+                          y={hy + pad}
+                          width={labelWidth}
+                          height={labelHeight}
+                          rx={Math.max(4, fontSize * 0.2)}
+                          fill="rgba(20, 20, 20, 0.72)"
+                        />
+                        <text
+                          x={hx + pad * 2}
+                          y={hy + pad + fontSize * 0.98}
+                          textAnchor="start"
+                          fontSize={fontSize}
+                          fontFamily="Georgia, serif"
+                          fontWeight="bold"
+                          fill="#fff8e8"
+                        >
+                          {value}
+                        </text>
+                      </g>
+                    );
+                  });
+                })}
+              </svg>
+            )}
           </>
         )}
 
@@ -1108,9 +1150,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                   const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
                   const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
                   const isEditing = editingPieceId === piece.id;
-                  const badgeFontSize = Math.max(16, Math.min(36, Math.min(width, height) * 0.22));
-                  const badgeWidth = Math.max(28, badgeFontSize * 1.25);
-                  const badgeHeight = badgeFontSize * 1.4;
                   const isHorizontal = width >= height;
                   const halfCenters = isHorizontal
                     ? [
@@ -1129,14 +1168,14 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                         width={width}
                         height={height}
                         rx={Math.max(4, Math.min(width, height) * 0.04)}
-                        fill={isEditing ? "rgba(245, 158, 11, 0.28)" : "rgba(16, 185, 129, 0.12)"}
-                        stroke={isEditing ? "#f59e0b" : "#4faaa7"}
+                        fill="transparent"
+                        stroke="transparent"
                         strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
                         vectorEffect="non-scaling-stroke"
                         pointerEvents="all"
                         role="button"
                         tabIndex={0}
-                        aria-label={`Editar peça ${piece.label}: ${piece.sideA} e ${piece.sideB}`}
+                        aria-label={`Editar peça ${piece.label}: lado A ${piece.sideA}, lado B ${piece.sideB}`}
                         aria-pressed={isEditing}
                         className="cursor-pointer"
                         onClick={() => handleStartPieceEdit(piece)}
@@ -1149,29 +1188,55 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                       >
                         <title>{`Editar ${piece.label}: ${piece.sideA} e ${piece.sideB}`}</title>
                       </rect>
-                      {halfCenters.map((half, halfIndex) => (
-                        <g key={halfIndex} pointerEvents="none">
-                          <rect
-                            x={half.x - badgeWidth / 2}
-                            y={half.y - badgeHeight / 2}
-                            width={badgeWidth}
-                            height={badgeHeight}
-                            rx={Math.max(5, badgeFontSize * 0.22)}
-                            fill="rgba(20, 20, 20, 0.72)"
-                          />
-                          <text
-                            x={half.x}
-                            y={half.y + badgeFontSize * 0.34}
-                            textAnchor="middle"
-                            fontSize={badgeFontSize}
-                            fontFamily="Georgia, serif"
-                            fontWeight="bold"
-                            fill="#fff8e8"
-                          >
-                            {half.value}
-                          </text>
-                        </g>
-                      ))}
+                      {halfCenters.map((half, halfIndex) => {
+                        const halfX = isHorizontal
+                          ? (halfIndex === 0 ? x : x + width / 2)
+                          : x;
+                        const halfY = isHorizontal
+                          ? y
+                          : (halfIndex === 0 ? y : y + height / 2);
+                        const halfWidth = isHorizontal ? width / 2 : width;
+                        const halfHeight = isHorizontal ? height : height / 2;
+                        const labelFontSize = Math.max(16, Math.min(34, Math.min(halfWidth, halfHeight) * 0.24));
+                        const labelPadding = Math.max(5, labelFontSize * 0.22);
+                        const labelWidth = Math.max(labelFontSize * 1.05, String(half.value).length * labelFontSize * 0.68 + labelPadding * 2);
+                        const labelHeight = labelFontSize * 1.35;
+                        const stroke = isEditing ? "#f59e0b" : "#4faaa7";
+                        return (
+                          <g key={halfIndex} pointerEvents="none">
+                            <rect
+                              x={halfX + 1}
+                              y={halfY + 1}
+                              width={Math.max(0, halfWidth - 2)}
+                              height={Math.max(0, halfHeight - 2)}
+                              rx={Math.max(4, Math.min(halfWidth, halfHeight) * 0.045)}
+                              fill={isEditing ? "rgba(245, 158, 11, 0.20)" : "rgba(16, 185, 129, 0.07)"}
+                              stroke={stroke}
+                              strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <rect
+                              x={halfX + labelPadding}
+                              y={halfY + labelPadding}
+                              width={labelWidth}
+                              height={labelHeight}
+                              rx={Math.max(4, labelFontSize * 0.2)}
+                              fill="rgba(20, 20, 20, 0.72)"
+                            />
+                            <text
+                              x={halfX + labelPadding * 2}
+                              y={halfY + labelPadding + labelFontSize * 0.98}
+                              textAnchor="start"
+                              fontSize={labelFontSize}
+                              fontFamily="Georgia, serif"
+                              fontWeight="bold"
+                              fill="#fff8e8"
+                            >
+                              {half.value}
+                            </text>
+                          </g>
+                        );
+                      })}
                     </g>
                   );
                 })}
