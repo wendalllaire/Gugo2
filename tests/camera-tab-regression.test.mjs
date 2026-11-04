@@ -74,3 +74,14 @@ test('offline image overlay does not draw a duplicate per-piece total label', ()
   assert.match(detectorSource, /halfA\.pips\.forEach/);
   assert.match(detectorSource, /halfB\.pips\.forEach/);
 });
+
+test('live camera performs throttled on-device CV and displays a provisional count', () => {
+  assert.ok(source.includes('const [livePieces, setLivePieces] = useState<DetectedPiece[]>([])'));
+  assert.ok(source.includes('detectDominoesOffline(frame.data, previewCanvas.width, previewCanvas.height'));
+  assert.ok(source.includes('now - lastScanAt < 900'));
+  assert.ok(source.includes('window.requestAnimationFrame(scanFrame)'));
+  assert.ok(source.includes('window.cancelAnimationFrame(animationFrame)'));
+  assert.ok(source.includes('Pré-contagem offline · confirma após fotografar'));
+  assert.ok(source.includes('aria-live="polite"'));
+  assert.ok(source.includes('livePieces.map((piece) => `[${piece.sideA}|${piece.sideB}]`)'));
+});
