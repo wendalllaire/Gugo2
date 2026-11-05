@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import jpeg from 'jpeg-js';
-import { detectDominoesOffline, detectPipsByRadialVoting, detectDominoesByRadialVoting } from './dominoDetectorCV.ts';
+import { detectDominoesOffline, detectPipsByRadialVoting, detectDominoesByRadialVoting, rgbToGrayscale } from './dominoDetectorCV.ts';
 
 const samplePath = path.resolve('public/samples/IMG_20261102_231406.jpg');
 const expectedUnordered = ['1-11', '4-6', '7-11'];
@@ -55,7 +55,7 @@ test('repository reference photo matches its documented domino gold standard', (
   assert.ok(fs.existsSync(samplePath), `Missing reference photo: ${samplePath}`);
   const decoded = jpeg.decode(fs.readFileSync(samplePath), { useTArray: true });
   const radialPips = detectPipsByRadialVoting(
-    new Uint8Array(decoded.data.filter((_, i) => i % 4 !== 3)), decoded.width, decoded.height
+    rgbToGrayscale(decoded.data, decoded.width, decoded.height), decoded.width, decoded.height
   );
   const radialTiles = detectDominoesByRadialVoting(decoded.data, decoded.width, decoded.height);
   const result = detectDominoesOffline(decoded.data, decoded.width, decoded.height);
