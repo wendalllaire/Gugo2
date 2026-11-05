@@ -751,44 +751,74 @@ function findPlausiblePipGrouping(
 ): PipGroupCandidate | null {
   if (pips.length < 8) return null;
   const frameShort = Math.min(width, height);
-  let best: PipGroupCandidate | null = null;
 
-  for (const axis of [0, 1] as const) {
-    const maxGroups = Math.min(10, Math.floor(pips.length / 4));
-    for (let count = 2; count <= maxGroups; count++) {
-      const groups = clusterPipsOnAxis(pips, axis, count);
-      if (groups.length !== count) continue;
-      let valid = true;
-      let penalty = 0;
-      for (const group of groups) {
-        if (group.length < 4 || group.length > 24) {
-          valid = false;
-          break;
-        }
-        const xs = group.map((p) => p.x);
-        const ys = group.map((p) => p.y);
-        const spanX = Math.max(...xs) - Math.min(...xs);
-        const spanY = Math.max(...ys) - Math.min(...ys);
-        const shortSpan = Math.min(spanX, spanY);
-        const longSpan = Math.max(spanX, spanY);
-        const aspect = longSpan / Math.max(1, shortSpan);
-        if (
-          shortSpan < Math.max(12, frameShort * 0.035) ||
-          longSpan < frameShort * 0.08 ||
-          aspect < 1.15 ||
-          aspect > 3.8
-        ) {
-          valid = false;
-          break;
-        }
-        penalty += Math.abs(Math.log(aspect / 2.2));
-      }
-      if (!valid) continue;
-      const score = count * 10 - penalty;
-      if (!best || score > best.score) best = { axis, count, clusters: groups, score };
+  // Estimate the local pip spacing from nearest-neighbour distances. A gap
+  // significantly larger than this is a stronger separator than a global
+  // one-axis clustering when the tray contains several rows of dominoes.
+  const nearestDistances = pips.map((pip, i) => {
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let j = 0; j < pips.length; j++) {
+      if (i === j) continue;
+      nearest = Math.min(nearest, Math.hypot(pip.x - pips[j].x, pip.y - pips[j].y));
     }
+    return nearest;
+  }).filter(Number.isFinite).sort((a, b) => a - b);
+  const medianNearest = nearestDistances[Math.floor(nearestDistances.length / 2)] || frameShort * 0.03;
+  const splitFloor = Math.max(frameShort * 0.014, medianNearest * 1.5);
+
+  const recurse = (group: DetectedPip[], depth: number): DetectedPip[][] => {
+    if (group.length < 4) return [];
+    const xs = group.map((p) => p.x);
+    const ys = group.map((p) => p.y);
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    const shortSpan = Math.min(spanX, spanY);
+    const longSpan = Math.max(spanX, spanY);
+    const aspect = longSpan / Math.max(1, shortSpan);
+    const looksLikeTile =
+      group.length <= 24 &&
+      shortSpan >= Math.max(8, frameShort * 0.018) &&
+      longSpan >= frameShort * 0.045 &&
+      aspect >= 1.05 && aspect <= 3.8;
+
+    if (looksLikeTile) return [group];
+    if (depth >= 8 || group.length < 8) return [];
+
+    let best: { axis: 0 | 1; index: number; gap: number; left: DetectedPip[]; right: DetectedPip[] } | null = null;
+    for (const axis of [0, 1] as const) {
+      const sorted = [...group].sort((a, b) => (axis === 0 ? a.x - b.x : a.y - b.y));
+      for (let i = 1; i < sorted.length - 1; i++) {
+        const previous = axis === 0 ? sorted[i - 1].x : sorted[i - 1].y;
+        const next = axis === 0 ? sorted[i].x : sorted[i].y;
+        const gap = next - previous;
+        if (gap <= splitFloor) continue;
+        const left = sorted.slice(0, i);
+        const right = sorted.slice(i);
+        if (left.length < 4 || right.length < 4) continue;
+        if (!best || gap > best.gap) best = { axis, index: i, gap, left, right };
+      }
+    }
+    if (!best) return [];
+
+    const leftGroups = recurse(best.left, depth + 1);
+    const rightGroups = recurse(best.right, depth + 1);
+    if (leftGroups.length === 0 || rightGroups.length === 0) return [];
+    return [...leftGroups, ...rightGroups];
+  };
+
+  const clusters = recurse(pips, 0);
+  if (clusters.length < 2 || clusters.length > 12) return null;
+  let score = 0;
+  for (const group of clusters) {
+    if (group.length < 4 || group.length > 24) return null;
+    const xs = group.map((p) => p.x);
+    const ys = group.map((p) => p.y);
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    const aspect = Math.max(spanX, spanY) / Math.max(1, Math.min(spanX, spanY));
+    score += 10 - Math.abs(Math.log(aspect / 2.0));
   }
-  return best;
+  return { axis: 0, count: clusters.length, clusters, score };
 }
 
 /**
@@ -850,8 +880,8 @@ export function detectPipsByRadialVoting(
   }
 
   const shortSide = Math.min(width, height);
-  const minRadius = Math.max(3, Math.round(shortSide * 0.008));
-  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.032));
+  const minRadius = Math.max(3, Math.round(shortSide * 0.0125));
+  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.025));
   const accumulator = new Uint16Array(gray.length);
 
   for (let y = 2; y < height - 2; y++) {
@@ -906,7 +936,7 @@ export function detectPipsByRadialVoting(
   }
 
   candidates.sort((a, b) => b.votes - a.votes);
-  const minDistance = Math.max(6, Math.round(shortSide * 0.021));
+  const minDistance = Math.max(6, Math.round(shortSide * 0.029));
   const minDistanceSquared = minDistance * minDistance;
   const selected: DetectedPip[] = [];
   const radius = (minRadius + maxRadius) / 2;
