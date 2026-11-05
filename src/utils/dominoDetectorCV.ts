@@ -810,16 +810,5 @@ export function drawDominoCVOverlay(
 
   }
 
-  // Global CV Watermark / Metrics Badge
-  const cvBadgeText = `⚡ Visão Multi-Peças (${cvResult.tilesCount} catalogadas) • ${cvResult.processingTimeMs}ms`;
-  ctx.font = '11px system-ui, -apple-system, sans-serif';
-  const badgeW = ctx.measureText(cvBadgeText).width + 16;
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  ctx.beginPath();
-  ctx.roundRect(10, 10, badgeW, 22, 6);
-  ctx.fill();
-  ctx.fillStyle = '#34d399';
-  ctx.fillText(cvBadgeText, 18, 25, Math.max(0, canvasWidth - 26));
-
   ctx.restore();
 }
