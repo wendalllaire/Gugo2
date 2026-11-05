@@ -574,8 +574,9 @@ export function clusterPipsIntoDominoes(
       // Constrain to maximum 12 pips per half for Mexican Train Double-12
       const countA = Math.min(12, pipsA.length);
       const countB = Math.min(12, pipsB.length);
-      const sideA = Math.min(countA, countB);
-      const sideB = Math.max(countA, countB);
+      // Preserve physical orientation: A is left/top, B is right/bottom.
+      const sideA = countA;
+      const sideB = countB;
 
       tiles.push({
         id: `tile-cluster-${tileCounter++}`,
@@ -609,7 +610,7 @@ export function isPlausibleDominoBox(
   const aspect = longSide / shortSide;
   const frameShortSide = Math.min(frameWidth, frameHeight);
   const frameLongSide = Math.max(frameWidth, frameHeight);
-  return areaFraction >= 0.00045 && areaFraction <= 0.18 &&
+  return areaFraction >= 0.00045 && areaFraction <= 0.07 &&
     shortSide >= Math.max(8, frameShortSide * 0.018) &&
     longSide >= Math.max(18, frameShortSide * 0.035) &&
     longSide <= frameLongSide * 0.9 &&
@@ -646,7 +647,10 @@ export function detectDominoesOffline(
   }
 
   // 1. Detect Pips: Pips are dark circular marks
-  const pipThreshold = Math.max(20, threshold - 15);
+  // Pip colors vary (yellow, red, grey and purple). A higher threshold captures their
+  // shaded circular bodies inside the already-cropped tile halves; the tile ROI
+  // prevents the dark felt from becoming pip candidates.
+  const pipThreshold = Math.min(190, Math.max(110, threshold + 35));
   const binPips = binarize(gray, pipThreshold, options.invertColors ?? false);
 
   // 2. Detect Domino Bodies: Light ivory surfaces
@@ -663,7 +667,7 @@ export function detectDominoesOffline(
 
   // Reject tiny specks and oversized regions at the connected-component stage.
   const minTileArea = (width * height) * 0.00045;
-  const maxTileArea = (width * height) * 0.18;
+  const maxTileArea = (width * height) * 0.07;
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
@@ -691,8 +695,9 @@ export function detectDominoesOffline(
 
       const countA = pipsA.length;
       const countB = pipsB.length;
-      const sideA = Math.min(countA, countB);
-      const sideB = Math.max(countA, countB);
+      // Preserve physical orientation: A is left/top, B is right/bottom.
+      const sideA = countA;
+      const sideB = countB;
 
       const confidence = Math.min(
         0.98,
