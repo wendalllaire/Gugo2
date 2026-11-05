@@ -884,7 +884,7 @@ export function detectPipsByRadialVoting(
   }
   if (maximumVotes < 8) return [];
   const minVotes = 8;
-  const voteThreshold = Math.max(minVotes, maximumVotes * 0.075);
+  const voteThreshold = Math.max(minVotes, maximumVotes * 0.18);
   const candidates: Array<{ x: number; y: number; votes: number }> = [];
 
   for (let y = 2; y < height - 2; y++) {
