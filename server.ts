@@ -190,7 +190,7 @@ REGRAS:
                 shortSide < Math.max(8, minFrameSide * 0.018) ||
                 longSide < Math.max(18, minFrameSide * 0.035) ||
                 longSide > Math.max(frameWidth, frameHeight) * 0.9 ||
-                areaFraction < 0.00045 || areaFraction > 0.07 ||
+                areaFraction < 0.0012 || areaFraction > 0.14 ||
                 aspect < 1.25 || aspect > 2.8 || confidence < 0.55) return [];
 
             return [{
