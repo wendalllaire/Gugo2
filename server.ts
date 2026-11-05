@@ -103,7 +103,9 @@ Analise a imagem da mesa e identifique e CATALOGUE TODAS AS PEÇAS DE DOMINÓ PR
 REGRAS:
 1. Um conjunto Double-12 possui valores de 0 a 12 pips em cada metade ([0|0] até [12|12]).
 2. As peças podem ser brancas/marfim OU amarelas; não exclua uma peça por ser amarela, por reflexos ou sombras.
-3. Catalogue apenas objetos com contorno físico de dominó: retângulo alongado, proporção aproximada 2:1 e duas metades.
+3. Os pontos podem ser amarelos, cinzentos/prateados, vermelhos, azuis, roxos, verdes ou pretos. Conte cada ponto circular elevado pelo seu contorno e centro, mesmo quando a cor ou o brilho têm pouco contraste com a peça.
+4. Um reflexo especular dentro de um ponto continua a ser o MESMO ponto: não conte o brilho como um ponto adicional e não descarte pontos cinzentos/amarelos por terem um centro claro.
+5. Catalogue apenas objetos com contorno físico de dominó: retângulo alongado, proporção aproximada 2:1 e duas metades.
 4. NÃO catalogue mãos, dedos, caixas, cartas, pratos, manchas, reflexos, sombras, padrões da mesa ou objetos fora da escala de uma peça.
 5. Retorne cada peça individualmente. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]"; confidence entre 0 e 1. Preserve a orientação da fotografia: sideA é a metade à esquerda (ou acima, se a peça estiver vertical) e sideB é a metade à direita (ou abaixo). Nunca ordene os valores numericamente.
 6. box2d=[ymin,xmin,ymax,xmax] normalizado 0 a 1000 e deve envolver apenas a peça.
@@ -132,6 +134,7 @@ REGRAS:
             ],
           },
           config: {
+            temperature: 0.1,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
