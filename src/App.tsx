@@ -13,10 +13,18 @@ import { calculateRanking, formatSocialShare } from './utils/dominoRules';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('camera');
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
-  const [players, setPlayers] = useState<Player[]>(INITIAL_PLAYERS);
-  const [settings, setSettings] = useState<GameSettings>(INITIAL_SETTINGS);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => { try { return localStorage.getItem('mexican-train-dark-mode') !== 'false'; } catch { return true; } });
+  const [players, setPlayers] = useState<Player[]>(() => { try { const saved = localStorage.getItem('mexican-train-players'); return saved ? JSON.parse(saved) as Player[] : INITIAL_PLAYERS; } catch { return INITIAL_PLAYERS; } });
+  const [settings, setSettings] = useState<GameSettings>(() => { try { const saved = localStorage.getItem('mexican-train-settings'); return saved ? JSON.parse(saved) as GameSettings : INITIAL_SETTINGS; } catch { return INITIAL_SETTINGS; } });
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mexican-train-players', JSON.stringify(players));
+      localStorage.setItem('mexican-train-settings', JSON.stringify(settings));
+      localStorage.setItem('mexican-train-dark-mode', String(isDarkMode));
+    } catch { /* O app continua utilizável sem armazenamento local. */ }
+  }, [players, settings, isDarkMode]);
 
   // Sync dark mode class on HTML document element
   useEffect(() => {
