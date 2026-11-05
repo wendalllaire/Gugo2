@@ -9,6 +9,8 @@ import {
   splitTileHalves,
   detectDominoesOffline,
   clusterPipsIntoDominoes,
+  detectAllPips,
+  buildAdaptivePipMask,
   DetectedPip,
 } from './dominoDetectorCV.ts';
 
@@ -175,6 +177,94 @@ test('detectDominoesOffline detects multiple dominoes on synthetic image', () =>
   assert.ok(result.totalPoints > 0);
 });
 
+
+test('adaptive pip mask detects yellow and grey pips after rotation and exposure/color changes', () => {
+  const width = 240;
+  const height = 160;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+
+  const put = (x: number, y: number, color: [number, number, number]) => {
+    const i = (y * width + x) * 4;
+    rgba[i] = color[0]; rgba[i + 1] = color[1]; rgba[i + 2] = color[2]; rgba[i + 3] = 255;
+  };
+  // Dark felt around a warm ivory tile. Pips are deliberately not black:
+  // yellow pips have high luminance and grey pips are low-contrast.
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    put(x, y, [28, 48, 35]);
+  }
+  for (let y = 38; y < 122; y++) for (let x = 24; x < 216; x++) {
+    put(x, y, [235, 228, 210]);
+  }
+
+  const drawPip = (cx: number, cy: number, radius: number, color: [number, number, number]) => {
+    for (let y = cy - radius; y <= cy + radius; y++) for (let x = cx - radius; x <= cx + radius; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2) put(x, y, color);
+    }
+  };
+  // A=2 yellow pips, B=12 grey pips (4 columns x 3 rows).
+  drawPip(58, 64, 4, [220, 178, 18]);
+  drawPip(88, 96, 4, [220, 178, 18]);
+  for (let row = 0; row < 3; row++) for (let col = 0; col < 4; col++) {
+    drawPip(137 + col * 19, 52 + row * 28, 4, [158, 153, 143]);
+  }
+
+  const rotate = (src: Uint8ClampedArray, w: number, h: number, degrees: 0 | 90 | 180 | 270) => {
+    const outW = degrees === 90 || degrees === 270 ? h : w;
+    const outH = degrees === 90 || degrees === 270 ? w : h;
+    const out = new Uint8ClampedArray(outW * outH * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let dx = x, dy = y;
+      if (degrees === 90) { dx = h - 1 - y; dy = x; }
+      if (degrees === 180) { dx = w - 1 - x; dy = h - 1 - y; }
+      if (degrees === 270) { dx = y; dy = w - 1 - x; }
+      const si = (y * w + x) * 4, di = (dy * outW + dx) * 4;
+      out.set(src.subarray(si, si + 4), di);
+    }
+    return { data: out, width: outW, height: outH };
+  };
+
+  const changeColor = (src: Uint8ClampedArray, brightness: number, contrast: number, saturation: number) => {
+    const out = new Uint8ClampedArray(src.length);
+    for (let i = 0; i < src.length; i += 4) {
+      const r = src[i], g = src[i + 1], b = src[i + 2];
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      for (let c = 0; c < 3; c++) {
+        const value = c === 0 ? r : c === 1 ? g : b;
+        const saturated = luma + (value - luma) * saturation;
+        out[i + c] = Math.max(0, Math.min(255, Math.round(((saturated - 128) * contrast + 128) * brightness)));
+      }
+      out[i + 3] = 255;
+    }
+    return out;
+  };
+
+  const variants: Array<{ data: Uint8ClampedArray; width: number; height: number }> = [];
+  for (const rotation of [0, 90, 180, 270] as const) {
+    const rotated = rotate(rgba, width, height, rotation);
+    variants.push(rotated);
+    for (const [brightness, contrast, saturation] of [
+      [0.78, 0.85, 0.45],
+      [0.92, 1.25, 1.5],
+      [1.12, 0.72, 0.0],
+    ] as const) {
+      variants.push({
+        ...rotated,
+        data: changeColor(rotated.data, brightness, contrast, saturation),
+      });
+    }
+  }
+
+  for (const variant of variants) {
+    const gray = rgbToGrayscale(variant.data, variant.width, variant.height);
+    const mask = buildAdaptivePipMask(gray, variant.width, variant.height);
+    const pips = detectAllPips(mask, variant.width, variant.height, 2.5, 12, 0.25);
+    assert.equal(
+      pips.length,
+      14,
+      `Expected 14 colored pips after image transforms; got ${pips.length} for ${variant.width}x${variant.height}`
+    );
+  }
+});
 
 test('yellow domino body is detected by chroma even when grayscale threshold is insufficient', () => {
   const w = 400;
