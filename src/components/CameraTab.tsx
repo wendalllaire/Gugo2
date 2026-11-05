@@ -257,6 +257,8 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         body: JSON.stringify({
           imageBase64: dataUrl,
           mode: engineMode,
+          width,
+          height,
         }),
       });
 
