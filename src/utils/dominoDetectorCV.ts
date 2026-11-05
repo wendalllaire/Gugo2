@@ -471,6 +471,67 @@ export function detectPipsInHalf(
 }
 
 /**
+ * Keeps pip candidates that lie on the standard 3x4 (or rotated 4x3) domino
+ * dot lattice. Highlights and table texture can form circular blobs, but they
+ * rarely land on the same regular lattice as the physical pips.
+ */
+export function filterPipsAgainstDominoGrid(
+  pips: DetectedPip[],
+  halfBbox: { x: number; y: number; width: number; height: number },
+  orientation: 'vertical' | 'horizontal'
+): DetectedPip[] {
+  if (pips.length === 0 || halfBbox.width <= 0 || halfBbox.height <= 0) return [];
+
+  const columns = orientation === 'vertical' ? 3 : 4;
+  const rows = orientation === 'vertical' ? 4 : 3;
+  const cellWidth = halfBbox.width / columns;
+  const cellHeight = halfBbox.height / rows;
+  const tolerance = Math.max(5, Math.min(cellWidth, cellHeight) * 0.46);
+  const slots: Array<{ x: number; y: number }> = [];
+
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      slots.push({
+        x: halfBbox.x + (column + 0.5) * cellWidth,
+        y: halfBbox.y + (row + 0.5) * cellHeight,
+      });
+    }
+  }
+
+  // The single pip and the centre pip in 3/5/7/9 patterns sit in the exact centre.
+  slots.push({
+    x: halfBbox.x + halfBbox.width / 2,
+    y: halfBbox.y + halfBbox.height / 2,
+  });
+
+  const bestAtSlot = new Map<number, DetectedPip>();
+  for (const pip of pips) {
+    let nearestSlot = -1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < slots.length; index++) {
+      const distance = Math.hypot(pip.x - slots[index].x, pip.y - slots[index].y);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestSlot = index;
+      }
+    }
+    if (nearestSlot < 0 || nearestDistance > tolerance) continue;
+
+    const previous = bestAtSlot.get(nearestSlot);
+    if (!previous ||
+        pip.circularity > previous.circularity + 0.04 ||
+        (Math.abs(pip.circularity - previous.circularity) <= 0.04 && pip.area > previous.area)) {
+      bestAtSlot.set(nearestSlot, pip);
+    }
+  }
+
+  return [...bestAtSlot.values()].sort((a, b) => {
+    const yDifference = a.y - b.y;
+    return Math.abs(yDifference) > 2 ? yDifference : a.x - b.x;
+  }).slice(0, 12);
+}
+
+/**
  * Splits a domino tile bounding box into two halves (Side A and Side B).
  */
 export function splitTileHalves(
@@ -1081,6 +1142,142 @@ function tilesFromRadialPips(
   return tiles;
 }
 
+/**
+ * Detects the dark centre stripe that physically separates the two halves of
+ * a domino. Its length is a much stronger scale cue than the surrounding table
+ * brightness, especially for yellow/grey pips and close-packed tiles.
+ */
+function detectDominoesFromDividerLines(
+  gray: Uint8Array,
+  binPips: Uint8Array,
+  width: number,
+  height: number,
+  otsuThreshold: number
+): DetectedTileCV[] {
+  const frameShort = Math.min(width, height);
+  if (frameShort < 160) return [];
+
+  const thresholds = [...new Set([
+    Math.max(45, otsuThreshold - 28),
+    Math.max(55, otsuThreshold),
+    Math.min(155, otsuThreshold + 32),
+  ])];
+  const candidates: Array<{
+    tile: DetectedTileCV;
+    centerX: number;
+    centerY: number;
+    dividerLength: number;
+  }> = [];
+
+  for (const threshold of thresholds) {
+    const darkMask = binarize(gray, threshold, false);
+    const lineBlobs = findConnectedComponents(
+      darkMask,
+      width,
+      height,
+      24,
+      width * height * 0.012
+    );
+
+    for (const blob of lineBlobs) {
+      const blobWidth = blob.maxX - blob.minX + 1;
+      const blobHeight = blob.maxY - blob.minY + 1;
+      const longSide = Math.max(blobWidth, blobHeight);
+      const shortSide = Math.min(blobWidth, blobHeight);
+      const aspect = longSide / Math.max(1, shortSide);
+      const fill = blob.area / Math.max(1, blobWidth * blobHeight);
+
+      if (
+        aspect < 5.2 ||
+        shortSide > Math.max(18, frameShort * 0.018) ||
+        longSide < frameShort * 0.05 ||
+        longSide > frameShort * 0.23 ||
+        fill < 0.24
+      ) continue;
+
+      const horizontalDivider = blobWidth >= blobHeight;
+      const centerX = blob.centroidX;
+      const centerY = blob.centroidY;
+      const shortDimension = longSide / 0.82;
+      const longDimension = shortDimension * 2.0;
+      const orientation: 'vertical' | 'horizontal' = horizontalDivider ? 'vertical' : 'horizontal';
+      const bbox = horizontalDivider
+        ? {
+            x: centerX - shortDimension / 2,
+            y: centerY - longDimension / 2,
+            width: shortDimension,
+            height: longDimension,
+          }
+        : {
+            x: centerX - longDimension / 2,
+            y: centerY - shortDimension / 2,
+            width: longDimension,
+            height: shortDimension,
+          };
+
+      // Reject cut-off dividers and implausible physical sizes.
+      if (
+        bbox.x < 2 || bbox.y < 2 ||
+        bbox.x + bbox.width > width - 2 ||
+        bbox.y + bbox.height > height - 2 ||
+        !isPlausibleDominoBox(bbox, width, height)
+      ) continue;
+
+      const { halfA, halfB } = splitTileHalves(
+        {
+          x: Math.round(bbox.x),
+          y: Math.round(bbox.y),
+          width: Math.round(bbox.width),
+          height: Math.round(bbox.height),
+        },
+        orientation
+      );
+      const pipsA = filterPipsAgainstDominoGrid(
+        detectPipsInHalf(binPips, width, halfA), halfA, orientation
+      );
+      const pipsB = filterPipsAgainstDominoGrid(
+        detectPipsInHalf(binPips, width, halfB), halfB, orientation
+      );
+      const sideA = pipsA.length;
+      const sideB = pipsB.length;
+
+      // A line in the table is not sufficient: it must sit inside a tile with
+      // visible pip evidence. True blank sides are still allowed.
+      if (sideA + sideB < 2 || sideA > 12 || sideB > 12) continue;
+
+      const lineQuality = Math.min(1, fill / 0.72);
+      const confidence = Number((0.88 + lineQuality * 0.1).toFixed(2));
+      const tile: DetectedTileCV = {
+        id: `tile-divider-${candidates.length + 1}`,
+        bbox,
+        orientation,
+        halfA: { bbox: halfA, pips: pipsA, count: sideA },
+        halfB: { bbox: halfB, pips: pipsB, count: sideB },
+        sideA,
+        sideB,
+        points: sideA + sideB,
+        confidence,
+        label: `[${sideA}|${sideB}]`,
+      };
+
+      const duplicate = candidates.find((candidate) =>
+        Math.hypot(candidate.centerX - centerX, candidate.centerY - centerY) < Math.max(10, frameShort * 0.012) &&
+        Math.abs(candidate.dividerLength - longSide) < Math.max(18, frameShort * 0.025)
+      );
+      if (!duplicate) {
+        candidates.push({ tile, centerX, centerY, dividerLength: longSide });
+      } else {
+        const previousPips = duplicate.tile.sideA + duplicate.tile.sideB;
+        if (tile.sideA + tile.sideB >= previousPips && tile.confidence >= duplicate.tile.confidence) {
+          duplicate.tile = tile;
+        }
+      }
+    }
+  }
+
+  return candidates.map((candidate) => candidate.tile);
+}
+
 /** Full-frame domino cataloguing from circular pip centres and the centre divider. */
 export function detectDominoesByRadialVoting(
   rgbaPixels: Uint8ClampedArray | Uint8Array,
@@ -1127,6 +1324,9 @@ export function detectDominoesOffline(
     binPips[i] = classicPips[i] || adaptivePips[i] ? 1 : 0;
   }
 
+  // Independent geometry path based on the physical centre divider stripe.
+  const dividerTiles = detectDominoesFromDividerLines(gray, binPips, width, height, threshold);
+
   // 2. Detect Domino Bodies: Light ivory surfaces
   const tileThreshold = Math.min(235, threshold + 18);
   const binTiles = binarize(gray, tileThreshold, true);
@@ -1164,8 +1364,12 @@ export function detectDominoesOffline(
       const bbox = { x: blob.minX, y: blob.minY, width: bw, height: bh };
 
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
-      const pipsA = detectPipsInHalf(binPips, width, halfA);
-      const pipsB = detectPipsInHalf(binPips, width, halfB);
+      const pipsA = filterPipsAgainstDominoGrid(
+        detectPipsInHalf(binPips, width, halfA), halfA, orientation
+      );
+      const pipsB = filterPipsAgainstDominoGrid(
+        detectPipsInHalf(binPips, width, halfB), halfB, orientation
+      );
 
       const countA = pipsA.length;
       const countB = pipsB.length;
@@ -1220,6 +1424,7 @@ export function detectDominoesOffline(
   // with the stronger point evidence for each tile; retain non-overlapping
   // proposals from either path so one incomplete detector cannot suppress pieces.
   const mergedTiles = [...detectedTiles];
+  const geometryProposals = [...dividerTiles, ...radialTiles];
   const intersectionOverUnion = (
     a: { x: number; y: number; width: number; height: number },
     b: { x: number; y: number; width: number; height: number }
@@ -1232,7 +1437,7 @@ export function detectDominoesOffline(
     return union > 0 ? intersection / union : 0;
   };
 
-  for (const radial of radialTiles) {
+  for (const radial of geometryProposals) {
     let bestIndex = -1;
     let bestOverlap = 0;
     for (let i = 0; i < mergedTiles.length; i++) {
