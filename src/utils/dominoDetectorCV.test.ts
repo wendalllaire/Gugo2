@@ -106,6 +106,9 @@ test('clusterPipsIntoDominoes correctly separates two distinct dominoes', () => 
   assert.equal(tiles.length, 2, 'Should detect exactly 2 distinct dominoes instead of 1 lumped tile');
   assert.ok(tiles[0].points > 0);
   assert.ok(tiles[1].points > 0);
+  const leftTile = tiles.find((tile) => tile.bbox.x < 100)!;
+  assert.equal(leftTile.sideA, 2, 'Top/left half must remain side A');
+  assert.equal(leftTile.sideB, 1, 'Bottom/right half must remain side B');
   assert.notEqual(tiles[0].bbox.x, tiles[1].bbox.x);
 });
 
@@ -201,5 +204,9 @@ test('domino geometry filter rejects tiny and oversized objects but accepts a ti
   const { isPlausibleDominoBox } = await import('./dominoDetectorCV.ts');
   assert.equal(isPlausibleDominoBox({ x: 10, y: 10, width: 5, height: 10 }, 640, 480), false);
   assert.equal(isPlausibleDominoBox({ x: 0, y: 0, width: 600, height: 400 }, 640, 480), false);
+  // The large empty tray from the supplied camera example is not a domino.
+  assert.equal(isPlausibleDominoBox({ x: 300, y: 400, width: 330, height: 540 }, 691, 1536), false);
+  // A real domino in the supplied original photo is within the accepted scale.
+  assert.equal(isPlausibleDominoBox({ x: 389, y: 325, width: 382, height: 202 }, 1152, 1536), true);
   assert.equal(isPlausibleDominoBox({ x: 100, y: 100, width: 40, height: 80 }, 640, 480), true);
 });
