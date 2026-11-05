@@ -134,6 +134,60 @@ export function binarize(
   return bin;
 }
 
+/**
+ * Builds a local-contrast pip mask. A global grayscale threshold misses glossy
+ * grey/yellow pips whenever exposure or reflected light lifts their luminance.
+ * The local mean is computed with an integral image so the same detector works
+ * at camera-preview and full-photo resolutions.
+ */
+export function buildAdaptivePipMask(
+  gray: Uint8Array,
+  width: number,
+  height: number,
+  invert = false
+): Uint8Array {
+  if (width <= 0 || height <= 0 || gray.length !== width * height) {
+    throw new Error('Invalid grayscale frame dimensions');
+  }
+
+  const stride = width + 1;
+  const integral = new Float64Array((width + 1) * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      rowSum += gray[y * width + x];
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
+
+  const radius = Math.max(4, Math.min(14, Math.round(Math.min(width, height) * 0.018)));
+  const mask = new Uint8Array(gray.length);
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(height, y + radius + 1);
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width, x + radius + 1);
+      const localSum =
+        integral[y1 * stride + x1] -
+        integral[y0 * stride + x1] -
+        integral[y1 * stride + x0] +
+        integral[y0 * stride + x0];
+      const localMean = localSum / ((x1 - x0) * (y1 - y0));
+      const value = gray[y * width + x];
+      const contrast = invert ? value - localMean : localMean - value;
+      const requiredContrast = Math.max(10, localMean * 0.045);
+
+      // Requiring a reasonably bright local neighbourhood confines detections
+      // to tile faces and avoids turning dark felt texture into domino pips.
+      if (localMean >= 105 && value <= 248 && contrast >= requiredContrast) {
+        mask[y * width + x] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
 export interface ComponentBlob {
   id: number;
   minX: number;
@@ -537,7 +591,7 @@ export function clusterPipsIntoDominoes(
     for (const sub of subClusters) {
       // An isolated speck is insufficient evidence. Phase A still detects
       // genuine [0|1] and blank tiles from their physical body.
-      if (sub.length < 2) continue;
+      if (sub.length < 4) continue;
 
       const sMinX = Math.min(...sub.map((p) => p.x));
       const sMaxX = Math.max(...sub.map((p) => p.x));
@@ -610,11 +664,11 @@ export function isPlausibleDominoBox(
   const aspect = longSide / shortSide;
   const frameShortSide = Math.min(frameWidth, frameHeight);
   const frameLongSide = Math.max(frameWidth, frameHeight);
-  return areaFraction >= 0.00045 && areaFraction <= 0.07 &&
-    shortSide >= Math.max(8, frameShortSide * 0.018) &&
-    longSide >= Math.max(18, frameShortSide * 0.035) &&
-    longSide <= frameLongSide * 0.9 &&
-    aspect >= 1.25 && aspect <= 2.8;
+  return areaFraction >= 0.0012 && areaFraction <= 0.08 &&
+    shortSide >= Math.max(10, frameShortSide * 0.022) &&
+    longSide >= Math.max(20, frameShortSide * 0.045) &&
+    longSide <= frameLongSide * 0.82 &&
+    aspect >= 1.35 && aspect <= 2.75;
 }
 
 /** Yellow hue/chroma mask; works when a yellow tile is not bright enough in grayscale. */
@@ -646,12 +700,16 @@ export function detectDominoesOffline(
     threshold = computeOtsuThreshold(gray);
   }
 
-  // 1. Detect Pips: Pips are dark circular marks
-  // Pip colors vary (yellow, red, grey and purple). Raise the old Otsu cutoff
-  // slightly so shaded pip edges remain visible without merging tile shadows.
-  // The half-tile crop and circularity/size gates reject the felt and divider.
-  const pipThreshold = Math.min(135, Math.max(110, threshold - 3));
-  const binPips = binarize(gray, pipThreshold, options.invertColors ?? false);
+  // 1. Detect Pips with both adaptive local contrast and the classic threshold.
+  // The adaptive mask retains glossy yellow/grey pips when their luminance is
+  // close to the tile face; the local-brightness gate rejects dark table texture.
+  const pipThreshold = Math.min(220, Math.max(105, threshold + 12));
+  const classicPips = binarize(gray, pipThreshold, options.invertColors ?? false);
+  const adaptivePips = buildAdaptivePipMask(gray, width, height, options.invertColors ?? false);
+  const binPips = new Uint8Array(gray.length);
+  for (let i = 0; i < binPips.length; i++) {
+    binPips[i] = classicPips[i] || adaptivePips[i] ? 1 : 0;
+  }
 
   // 2. Detect Domino Bodies: Light ivory surfaces
   const tileThreshold = Math.min(235, threshold + 18);
