@@ -293,10 +293,15 @@ test('yellow domino body is detected by chroma even when grayscale threshold is 
 test('domino geometry filter rejects tiny and oversized objects but accepts a tile', async () => {
   const { isPlausibleDominoBox } = await import('./dominoDetectorCV.ts');
   assert.equal(isPlausibleDominoBox({ x: 10, y: 10, width: 5, height: 10 }, 640, 480), false);
+  assert.equal(isPlausibleDominoBox({ x: 10, y: 10, width: 84, height: 38 }, 1280, 1707), false,
+    'tiny rectangular reflections must not be classified as dominoes');
   assert.equal(isPlausibleDominoBox({ x: 0, y: 0, width: 600, height: 400 }, 640, 480), false);
   // The large empty tray from the supplied camera example is not a domino.
   assert.equal(isPlausibleDominoBox({ x: 300, y: 400, width: 330, height: 540 }, 691, 1536), false);
   // A real domino in the supplied original photo is within the accepted scale.
   assert.equal(isPlausibleDominoBox({ x: 389, y: 325, width: 382, height: 202 }, 1152, 1536), true);
   assert.equal(isPlausibleDominoBox({ x: 100, y: 100, width: 40, height: 80 }, 640, 480), true);
+  assert.equal(isPlausibleDominoBox({ x: 0, y: 300, width: 200, height: 100 }, 1280, 1707), false,
+    'objects clipped by the image edge must be rejected');
+  assert.equal(isPlausibleDominoBox({ x: 500, y: 600, width: 200, height: 100 }, 1280, 1707), true);
 });
