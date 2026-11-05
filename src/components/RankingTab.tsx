@@ -30,6 +30,9 @@ import {
   Calculator,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 interface RankingTabProps {
   players: Player[];
@@ -268,14 +271,49 @@ export const RankingTab: React.FC<RankingTabProps> = ({
       URL.revokeObjectURL(imageUrl);
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Falha ao criar imagem')), 'image/png'));
       const file = new File([blob], 'ranking-domino-mexicano.png', { type: 'image/png' });
-      const shareData = { title: 'Ranking Dominó Mexicano', text: message, files: [file] };
-      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-        await navigator.share(shareData);
-        setShareSuccessToast('Imagem e mensagem prontas para enviar pelo WhatsApp!');
+      if (Capacitor.isNativePlatform()) {
+        // In Android WebView, navigator.share(files) is not reliably implemented.
+        // Persist the PNG in the app cache and invoke Android's native Sharesheet.
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || '');
+            const comma = result.indexOf(',');
+            if (comma < 0) reject(new Error('Não foi possível preparar a imagem'));
+            else resolve(result.slice(comma + 1));
+          };
+          reader.onerror = () => reject(new Error('Não foi possível ler a imagem'));
+          reader.readAsDataURL(blob);
+        });
+        const saved = await Filesystem.writeFile({
+          path: 'ranking-domino-mexicano.png',
+          data: base64,
+          directory: Directory.Cache,
+          recursive: true,
+        });
+        await Share.share({
+          title: 'Ranking Dominó Mexicano',
+          text: message,
+          files: [saved.uri],
+          dialogTitle: 'Partilhar pódio e tabela',
+        });
+        setShareSuccessToast('Imagem e mensagem prontas para partilhar!');
+      } else if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        await navigator.share({
+          title: 'Ranking Dominó Mexicano',
+          text: message,
+          files: [file],
+        });
+        setShareSuccessToast('Imagem e mensagem prontas para partilhar!');
       } else {
-        const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click();
+        const imageUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = imageUrl;
+        link.download = file.name;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
         await copyToClipboard(message);
-        setShareSuccessToast('Imagem guardada. Anexe-a no WhatsApp; a mensagem foi copiada.');
+        setShareSuccessToast('Imagem guardada e mensagem copiada. Anexe a imagem na aplicação de destino.');
       }
       setTimeout(() => setShareSuccessToast(null), 4000);
     } catch (error) {
