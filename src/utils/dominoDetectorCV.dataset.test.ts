@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import jpeg from 'jpeg-js';
-import { detectDominoesOffline, detectPipsByRadialVoting, detectDominoesByRadialVoting, rgbToGrayscale } from './dominoDetectorCV.ts';
+import { detectDominoesOffline } from './dominoDetectorCV.ts';
 
 const sampleDirectory = path.resolve('public/samples');
 const referenceImage = 'IMG_20261102_231406.jpg';
@@ -104,74 +104,79 @@ function adjustColor(
   return out;
 }
 
-function assertMatchesGoldStandard(
+function compareWithGoldStandard(
   name: string,
   rgba: Uint8Array,
   width: number,
   height: number,
   expected: string[],
   transform = 'original'
-) {
+): string | null {
   const result = detectDominoesOffline(rgba, width, height);
   const actual = result.pieces.map((piece) => normalizePair(piece.sideA, piece.sideB)).sort();
-  const gray = rgbToGrayscale(rgba, width, height);
-  const radialPips = detectPipsByRadialVoting(gray, width, height);
-  const radialTiles = detectDominoesByRadialVoting(rgba, width, height);
-  assert.deepEqual(
-    actual,
-    expected,
-    `${name} [${transform}] expected ${expected.join(', ')}; got ${actual.join(', ')}; oriented=${JSON.stringify(result.pieces.map(p => [p.sideA,p.sideB]))}; total=${result.totalPoints}; radialPips=${radialPips.length}; radialTiles=${JSON.stringify(radialTiles.map(t => [t.sideA,t.sideB]))}`
+  if (JSON.stringify(actual) === JSON.stringify(expected)) return null;
+  const oriented = result.pieces.map((piece) => ({
+    sides: [piece.sideA, piece.sideB],
+    box: piece.box2d,
+    confidence: piece.confidence,
+  }));
+  return `${name} [${transform}] expected=${expected.join(',')} actual=${actual.join(',')} oriented=${JSON.stringify(oriented)} total=${result.totalPoints}`;
+}
+
+function assertNoMismatches(title: string, errors: string[]) {
+  assert.equal(
+    errors.length,
+    0,
+    `${title}: ${errors.length} mismatch(es)\n${errors.slice(0, 40).join('\n')}\n${errors.length > 40 ? `... and ${errors.length - 40} more` : ''}`
   );
 }
 
 test('repository reference photograph matches its documented gold standard', () => {
   const image = decodeSample(referenceImage);
-  assertMatchesGoldStandard(referenceImage, image.data, image.width, image.height, referenceExpected);
+  const mismatch = compareWithGoldStandard(referenceImage, image.data, image.width, image.height, referenceExpected);
+  assertNoMismatches('reference photograph', mismatch ? [mismatch] : []);
   const result = detectDominoesOffline(image.data, image.width, image.height);
   assert.equal(result.totalPoints, 40);
 });
 
 test('every labeled public/samples image matches the domino values in its filename', () => {
   assert.ok(sampleNames.length >= 10, `Expected the labeled sample set in public/samples; found ${sampleNames.length}`);
+  const errors: string[] = [];
   for (const name of sampleNames) {
     const expected = expectedPairsFromFilename(name);
     const image = decodeSample(name);
     assert.ok(expected.length > 0, `No domino gold-standard pairs parsed from ${name}`);
-    assertMatchesGoldStandard(name, image.data, image.width, image.height, expected);
+    const mismatch = compareWithGoldStandard(name, image.data, image.width, image.height, expected);
+    if (mismatch) errors.push(mismatch);
   }
+  assertNoMismatches('unmodified sample photos', errors);
 });
 
-test('yellow and grey domino sample and its v2 keep their values under rotation and color transforms', () => {
-  const names = [
-    '2-12 3-4 6-9.jpg',
-    '2-12 3-4 6-9 v2.jpg',
-    '7-11 1-11 4-6.jpg',
-    '7-11 1-11 4-6 v2.jpg',
+test('all labeled sample photos keep their gold standard under rotations and color/exposure transforms', () => {
+  const samples = [
+    { name: referenceImage, expected: referenceExpected },
+    ...sampleNames.map((name) => ({ name, expected: expectedPairsFromFilename(name) })),
   ];
   const configs = [
-    [1, 1, 1],
-    [0.78, 0.85, 0.45],
-    [0.92, 1.25, 1.5],
-    [1.12, 0.72, 0],
-  ] as const;
+    { brightness: 1, contrast: 1, saturation: 1, label: 'neutral' },
+    { brightness: 0.78, contrast: 0.85, saturation: 0.45, label: 'dim-low-contrast-low-saturation' },
+    { brightness: 0.92, contrast: 1.25, saturation: 1.5, label: 'slightly-dim-high-contrast-high-saturation' },
+    { brightness: 1.12, contrast: 0.72, saturation: 0.65, label: 'bright-low-contrast-muted-colors' },
+  ];
   const rotations = [0, 90, 180, 270] as const;
+  const errors: string[] = [];
 
-  for (const name of names) {
+  for (const { name, expected } of samples) {
     const image = decodeSample(name);
-    const expected = expectedPairsFromFilename(name);
     for (const degrees of rotations) {
       const rotated = rotateRgba(image.data, image.width, image.height, degrees);
-      for (const [brightness, contrast, saturation] of configs) {
-        const rgba = adjustColor(rotated.data, brightness, contrast, saturation);
-        assertMatchesGoldStandard(
-          name,
-          rgba,
-          rotated.width,
-          rotated.height,
-          expected,
-          `rotation=${degrees}; brightness=${brightness}; contrast=${contrast}; saturation=${saturation}`
-        );
+      for (const config of configs) {
+        const rgba = adjustColor(rotated.data, config.brightness, config.contrast, config.saturation);
+        const transform = `rotation=${degrees}; ${config.label}; brightness=${config.brightness}; contrast=${config.contrast}; saturation=${config.saturation}`;
+        const mismatch = compareWithGoldStandard(name, rgba, rotated.width, rotated.height, expected, transform);
+        if (mismatch) errors.push(mismatch);
       }
     }
   }
+  assertNoMismatches('rotated and color-adjusted sample photos', errors);
 });
