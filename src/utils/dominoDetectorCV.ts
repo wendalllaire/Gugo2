@@ -591,7 +591,7 @@ export function clusterPipsIntoDominoes(
     for (const sub of subClusters) {
       // An isolated speck is insufficient evidence. Phase A still detects
       // genuine [0|1] and blank tiles from their physical body.
-      if (sub.length < 4) continue;
+      if (sub.length < 3) continue;
 
       const sMinX = Math.min(...sub.map((p) => p.x));
       const sMaxX = Math.max(...sub.map((p) => p.x));
@@ -664,7 +664,7 @@ export function isPlausibleDominoBox(
   const aspect = longSide / shortSide;
   const frameShortSide = Math.min(frameWidth, frameHeight);
   const frameLongSide = Math.max(frameWidth, frameHeight);
-  return areaFraction >= 0.0012 && areaFraction <= 0.08 &&
+  return areaFraction >= 0.0012 && areaFraction <= 0.14 &&
     shortSide >= Math.max(10, frameShortSide * 0.022) &&
     longSide >= Math.max(20, frameShortSide * 0.045) &&
     longSide <= frameLongSide * 0.82 &&
