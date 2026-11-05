@@ -177,13 +177,13 @@ test('detectDominoesOffline detects multiple dominoes on synthetic image', () =>
 
 
 test('yellow domino body is detected by chroma even when grayscale threshold is insufficient', () => {
-  const w = 200;
-  const h = 160;
+  const w = 400;
+  const h = 300;
   const rgba = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     rgba[i * 4] = 20; rgba[i * 4 + 1] = 75; rgba[i * 4 + 2] = 35; rgba[i * 4 + 3] = 255;
   }
-  for (let y = 35; y < 125; y++) for (let x = 75; x < 125; x++) {
+  for (let y = 105; y < 195; y++) for (let x = 175; x < 225; x++) {
     const i = (y * w + x) * 4;
     rgba[i] = 245; rgba[i + 1] = 205; rgba[i + 2] = 45;
   }
@@ -195,7 +195,7 @@ test('yellow domino body is detected by chroma even when grayscale threshold is 
       }
     }
   };
-  drawPip(100, 55); drawPip(100, 105);
+  drawPip(200, 125); drawPip(200, 175);
   const result = detectDominoesOffline(rgba, w, h);
   assert.ok(result.tiles.length >= 1, 'Yellow domino should be detected');
 });
