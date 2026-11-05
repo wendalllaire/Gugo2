@@ -850,8 +850,8 @@ export function detectPipsByRadialVoting(
   }
 
   const shortSide = Math.min(width, height);
-  const minRadius = Math.max(3, Math.round(shortSide * 0.0125));
-  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.025));
+  const minRadius = Math.max(3, Math.round(shortSide * 0.008));
+  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.032));
   const accumulator = new Uint16Array(gray.length);
 
   for (let y = 2; y < height - 2; y++) {
@@ -883,8 +883,8 @@ export function detectPipsByRadialVoting(
     if (accumulator[i] > maximumVotes) maximumVotes = accumulator[i];
   }
   if (maximumVotes < 8) return [];
-  const minVotes = shortSide < 400 ? 8 : 30;
-  const voteThreshold = Math.max(minVotes, maximumVotes * 0.18);
+  const minVotes = 8;
+  const voteThreshold = Math.max(minVotes, maximumVotes * 0.075);
   const candidates: Array<{ x: number; y: number; votes: number }> = [];
 
   for (let y = 2; y < height - 2; y++) {
@@ -906,7 +906,7 @@ export function detectPipsByRadialVoting(
   }
 
   candidates.sort((a, b) => b.votes - a.votes);
-  const minDistance = Math.max(6, Math.round(shortSide * 0.029));
+  const minDistance = Math.max(6, Math.round(shortSide * 0.021));
   const minDistanceSquared = minDistance * minDistance;
   const selected: DetectedPip[] = [];
   const radius = (minRadius + maxRadius) / 2;
