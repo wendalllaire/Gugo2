@@ -778,7 +778,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                 })}
                 <text
                   x={lastRawImageData.width / 2}
-                  y={lastRawImageData.height * 0.68}
+                  y={lastRawImageData.height * 0.12}
                   textAnchor="middle"
                   fontSize={Math.max(36, Math.min(72, lastRawImageData.width * 0.06))}
                   fontFamily="Georgia, serif"
@@ -957,8 +957,8 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm space-y-4">
           {/* Piece count stays outside the unchanged total-score indicator. */}
           <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
-            <span className="text-sm font-bold text-zinc-600 dark:text-zinc-300">
-              {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'peça' : 'peças'}
+            <span className="text-xl font-black text-zinc-600 dark:text-zinc-300">
+              {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'Peça' : 'Peças'} com total de:
             </span>
             <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
               {visionResult.totalPoints} pts
