@@ -80,6 +80,8 @@ app.post('/api/analyze-dominoes', async (req: Request, res: Response): Promise<v
   const startTime = Date.now();
   try {
     const { imageBase64, mode = 'auto' } = req.body;
+    const frameWidth = Math.max(1, Number(req.body.width) || 1000);
+    const frameHeight = Math.max(1, Number(req.body.height) || 1000);
 
     if (!imageBase64) {
       res.status(400).json({ error: 'Nenhuma imagem foi fornecida.' });
@@ -175,13 +177,19 @@ REGRAS:
             const [yMin, xMin, yMax, xMax] = box;
             const boxWidth = xMax - xMin;
             const boxHeight = yMax - yMin;
-            const shortSide = Math.min(boxWidth, boxHeight);
-            const longSide = Math.max(boxWidth, boxHeight);
+            const pixelWidth = boxWidth * frameWidth / 1000;
+            const pixelHeight = boxHeight * frameHeight / 1000;
+            const shortSide = Math.min(pixelWidth, pixelHeight);
+            const longSide = Math.max(pixelWidth, pixelHeight);
             const areaFraction = (boxWidth * boxHeight) / 1000000;
             const aspect = longSide / Math.max(1, shortSide);
+            const minFrameSide = Math.min(frameWidth, frameHeight);
             const confidence = Number(p.confidence ?? 0.8);
             // Filter model hallucinations by normalized scale, aspect and confidence.
-            if (xMax <= xMin || yMax <= yMin || shortSide < 18 || longSide > 900 ||
+            if (xMax <= xMin || yMax <= yMin ||
+                shortSide < Math.max(8, minFrameSide * 0.018) ||
+                longSide < Math.max(18, minFrameSide * 0.035) ||
+                longSide > Math.max(frameWidth, frameHeight) * 0.9 ||
                 areaFraction < 0.00045 || areaFraction > 0.18 ||
                 aspect < 1.25 || aspect > 2.8 || confidence < 0.55) return [];
 
