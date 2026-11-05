@@ -9,18 +9,22 @@ import { INITIAL_PLAYERS, INITIAL_SETTINGS } from './data/sampleData';
 import { AndroidFrame } from './components/AndroidFrame';
 import { CameraTab } from './components/CameraTab';
 import { RankingTab } from './components/RankingTab';
-import { KotlinCodeModal } from './components/KotlinCodeModal';
-import { ApkDownloadModal } from './components/ApkDownloadModal';
 import { calculateRanking, formatSocialShare } from './utils/dominoRules';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('camera');
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
-  const [players, setPlayers] = useState<Player[]>(INITIAL_PLAYERS);
-  const [settings, setSettings] = useState<GameSettings>(INITIAL_SETTINGS);
-  const [isKotlinModalOpen, setIsKotlinModalOpen] = useState<boolean>(false);
-  const [isApkModalOpen, setIsApkModalOpen] = useState<boolean>(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => { try { return localStorage.getItem('mexican-train-dark-mode') !== 'false'; } catch { return true; } });
+  const [players, setPlayers] = useState<Player[]>(() => { try { const saved = localStorage.getItem('mexican-train-players'); return saved ? JSON.parse(saved) as Player[] : INITIAL_PLAYERS; } catch { return INITIAL_PLAYERS; } });
+  const [settings, setSettings] = useState<GameSettings>(() => { try { const saved = localStorage.getItem('mexican-train-settings'); return saved ? JSON.parse(saved) as GameSettings : INITIAL_SETTINGS; } catch { return INITIAL_SETTINGS; } });
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mexican-train-players', JSON.stringify(players));
+      localStorage.setItem('mexican-train-settings', JSON.stringify(settings));
+      localStorage.setItem('mexican-train-dark-mode', String(isDarkMode));
+    } catch { /* O app continua utilizável sem armazenamento local. */ }
+  }, [players, settings, isDarkMode]);
 
   // Sync dark mode class on HTML document element
   useEffect(() => {
@@ -96,8 +100,6 @@ export default function App() {
         onTabChange={setCurrentTab}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        onOpenKotlinModal={() => setIsKotlinModalOpen(true)}
-        onOpenApkModal={() => setIsApkModalOpen(true)}
         onShare={handleShare}
         currentRound={settings.currentRound}
         maxRounds={settings.maxRounds}
@@ -115,7 +117,6 @@ export default function App() {
             players={players}
             currentRound={settings.currentRound}
             onAssignScore={handleAssignScore}
-            onOpenApkModal={() => setIsApkModalOpen(true)}
           />
         )}
 
@@ -130,17 +131,6 @@ export default function App() {
         )}
       </AndroidFrame>
 
-      {/* Standalone Kotlin Jetpack Compose Code Inspector Modal */}
-      <KotlinCodeModal
-        isOpen={isKotlinModalOpen}
-        onClose={() => setIsKotlinModalOpen(false)}
-      />
-
-      {/* APK & Source Code Download Modal */}
-      <ApkDownloadModal
-        isOpen={isApkModalOpen}
-        onClose={() => setIsApkModalOpen(false)}
-      />
     </>
   );
 }

@@ -17,7 +17,6 @@ import {
   Trash2,
   Edit2,
   Calculator,
-  Smartphone,
   Eye,
   SlidersHorizontal,
   Cpu,
@@ -29,14 +28,12 @@ interface CameraTabProps {
   players: Player[];
   currentRound: number;
   onAssignScore: (playerId: string, score: number, pieces?: DominoTile[]) => void;
-  onOpenApkModal?: () => void;
 }
 
 export const CameraTab: React.FC<CameraTabProps> = ({
   players,
   currentRound,
   onAssignScore,
-  onOpenApkModal,
 }) => {
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -47,6 +44,8 @@ export const CameraTab: React.FC<CameraTabProps> = ({
   const [visionResult, setVisionResult] = useState<VisionResult | null>(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>(players[0]?.id || '');
   const [assignSuccess, setAssignSuccess] = useState(false);
+  const [offlineProcessingNotice, setOfflineProcessingNotice] = useState(false);
+  const [isPieceEditorPopupOpen, setIsPieceEditorPopupOpen] = useState(false);
 
   // Engine selection: 'auto' (Try Gemini -> fallback Offline), 'gemini' (Online AI), 'offline' (Double-Double-Dominoes)
   const [engineMode, setEngineMode] = useState<'auto' | 'gemini' | 'offline'>('auto');
@@ -243,6 +242,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     setIsAnalyzing(true);
     setVisionResult(null);
     setAssignSuccess(false);
+    setOfflineProcessingNotice(false);
 
     if (engineMode === 'offline') {
       runOfflineCV(pixelData, width, height, dataUrl);
@@ -347,6 +347,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     setIsAnalyzing(true);
     setVisionResult(null);
     setAssignSuccess(false);
+    setOfflineProcessingNotice(true);
 
     try {
       const cvOptions: CVOptions = {
@@ -442,6 +443,42 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     setEditSideB(piece.sideB);
   };
 
+  const handleOpenPieceEditorPopup = (piece: DetectedPiece) => {
+    setEditingPieceId(piece.id);
+    setEditSideA(piece.sideA);
+    setEditSideB(piece.sideB);
+    setIsPieceEditorPopupOpen(true);
+  };
+
+  // Add a piece without depending on a previously detected result.
+  const handleAddManualPiece = () => {
+    const sideA = Math.min(manualA, manualB);
+    const sideB = Math.max(manualA, manualB);
+    const newPiece: DetectedPiece = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sideA,
+      sideB,
+      points: sideA + sideB,
+      label: `[${sideA}|${sideB}]`,
+    };
+
+    setVisionResult((previous) => {
+      const pieces = [...(previous?.pieces ?? []), newPiece];
+      return {
+        pieces,
+        totalPoints: pieces.reduce((sum, piece) => sum + piece.points, 0),
+        source: previous?.source ?? 'manual',
+        imageUrl: previous?.imageUrl ?? capturedImage ?? undefined,
+        warning: previous?.warning?.includes('Nenhuma peça foi identificada') ? undefined : previous?.warning,
+        timingMs: previous?.timingMs,
+        thresholdUsed: previous?.thresholdUsed,
+        pipsTotal: previous?.pipsTotal,
+      };
+    });
+    setShowManualAdd(false);
+    setEditingPieceId(null);
+  };
+
   // Save individual piece editing
   const handleSavePieceEdit = (pieceId: string) => {
     if (!visionResult) return;
@@ -508,34 +545,619 @@ export const CameraTab: React.FC<CameraTabProps> = ({
 
   return (
     <div className="space-y-4 pb-20">
-      {/* Header Banner */}
-      <div className="rounded-2xl bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center text-xl backdrop-blur-xs">
-              <Camera className="w-5 h-5 text-white" />
-            </div>
-            <div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {onOpenApkModal && (
+      {/* Camera / Viewfinder Box */}
+      <div className={streamActive ? "fixed inset-0 z-[100] h-[100dvh] w-screen overflow-hidden bg-black flex flex-col items-center justify-center" : capturedImage ? "relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm aspect-4/3 flex flex-col items-center justify-center" : "hidden"}>
+        {/* Live Video Feed */}
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          className={`absolute inset-0 w-full h-full ${streamActive ? 'object-cover block' : 'object-cover hidden'}`}
+        />
+        {streamActive && (
+          <>
+            <button
+              type="button"
+              onClick={stopCamera}
+              aria-label="Fechar câmara"
+              className="absolute top-5 left-5 z-30 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm border border-white/30"
+            >
+              <span aria-hidden="true" className="text-2xl leading-none">×</span>
+            </button>
+            <div className="absolute bottom-8 left-0 right-0 z-30 flex justify-center">
               <button
                 type="button"
-                onClick={onOpenApkModal}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-800 rounded-full font-bold text-[11px] shadow-xs transition-colors"
-                title="Baixar APK ou Instalar no Android"
+                onClick={handleCaptureSnapshot}
+                aria-label="Tirar fotografia"
+                className="flex h-[76px] w-[76px] items-center justify-center rounded-full border-[5px] border-white bg-white/25 shadow-xl active:scale-95 transition-transform"
               >
-                <Smartphone className="w-3 h-3" />
-                <span>Baixar APK</span>
+                <span className="h-[56px] w-[56px] rounded-full bg-white" />
               </button>
+            </div>
+            <div className="absolute top-6 right-5 z-30 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
+              Câmara ativa
+            </div>
+            <div
+              className="absolute top-20 left-1/2 z-30 -translate-x-1/2 max-w-[90vw] rounded-2xl border border-white/25 bg-black/70 px-4 py-2 text-center text-white shadow-lg backdrop-blur-sm"
+              aria-live="polite"
+              aria-label={`Pré-contagem: ${livePieces.length} peças, ${livePieces.reduce((sum, piece) => sum + piece.points, 0)} pontos`}
+            >
+              <div className="text-sm font-black">
+                {livePieces.length} {livePieces.length === 1 ? 'peça' : 'peças'} · {livePieces.reduce((sum, piece) => sum + piece.points, 0)} pts
+              </div>
+              <div className="mt-0.5 max-w-full truncate text-[11px] font-semibold text-emerald-200">
+                {livePieces.length
+                  ? livePieces.map((piece) => `[${piece.sideA}|${piece.sideB}]`).join('  ')
+                  : 'A procurar dominós…'}
+              </div>
+              <div className="mt-0.5 text-[9px] text-white/65">Pré-contagem offline · confirma após fotografar</div>
+            </div>
+            {livePieces.length > 0 && videoRef.current?.videoWidth && videoRef.current?.videoHeight && (
+              <svg
+                aria-label="Pré-contagem visual: cada metade do dominó está contornada e identificada"
+                viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
+                preserveAspectRatio="xMidYMid slice"
+                className="absolute inset-0 z-20 h-full w-full pointer-events-none"
+              >
+                {livePieces.map((piece) => {
+                  if (!piece.box2d) return null;
+                  const [yMin, xMin, yMax, xMax] = piece.box2d;
+                  const px = (xMin / 1000) * videoRef.current!.videoWidth;
+                  const py = (yMin / 1000) * videoRef.current!.videoHeight;
+                  const pw = ((xMax - xMin) / 1000) * videoRef.current!.videoWidth;
+                  const ph = ((yMax - yMin) / 1000) * videoRef.current!.videoHeight;
+                  const horizontal = pw >= ph;
+                  return [piece.sideA, piece.sideB].map((value, index) => {
+                    const hx = horizontal ? px + (index * pw) / 2 : px;
+                    const hy = horizontal ? py : py + (index * ph) / 2;
+                    const hw = horizontal ? pw / 2 : pw;
+                    const hh = horizontal ? ph : ph / 2;
+                    const fontSize = Math.max(16, Math.min(34, Math.min(hw, hh) * 0.24));
+                    const pad = Math.max(5, fontSize * 0.22);
+                    const labelWidth = Math.max(fontSize * 1.05, String(value).length * fontSize * 0.68 + pad * 2);
+                    const labelHeight = fontSize * 1.35;
+                    return (
+                      <g key={`${piece.id}-half-${index}`}>
+                        <rect
+                          x={hx + 1}
+                          y={hy + 1}
+                          width={Math.max(0, hw - 2)}
+                          height={Math.max(0, hh - 2)}
+                          rx={Math.max(4, Math.min(hw, hh) * 0.045)}
+                          fill="rgba(16, 185, 129, 0.07)"
+                          stroke="#4faaa7"
+                          strokeWidth="4"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <rect
+                          x={hx + pad}
+                          y={hy + pad}
+                          width={labelWidth}
+                          height={labelHeight}
+                          rx={Math.max(4, fontSize * 0.2)}
+                          fill="rgba(20, 20, 20, 0.72)"
+                        />
+                        <text
+                          x={hx + pad * 2}
+                          y={hy + pad + fontSize * 0.98}
+                          textAnchor="start"
+                          fontSize={fontSize}
+                          fontFamily="Georgia, serif"
+                          fontWeight="bold"
+                          fill="#fff8e8"
+                        >
+                          {value}
+                        </text>
+                      </g>
+                    );
+                  });
+                })}
+              </svg>
             )}
+          </>
+        )}
+
+        {/* Captured Image / CV Overlay View */}
+        {capturedImage && !streamActive && (
+          <>
+            <img
+              src={showOverlay && overlayImage ? overlayImage : capturedImage}
+              alt="Foto do conjunto de dominós processada"
+              className="absolute inset-0 w-full h-full object-contain bg-zinc-950"
+            />
+            {visionResult && lastRawImageData && visionResult.pieces.some((piece) => piece.box2d) && (
+              <svg
+                aria-label="Peças detetadas. Toque duas vezes numa peça para abrir o editor."
+                role="group"
+                viewBox={`0 0 ${lastRawImageData.width} ${lastRawImageData.height}`}
+                preserveAspectRatio="xMidYMid meet"
+                className="absolute inset-0 z-[5] w-full h-full"
+              >
+                {visionResult.pieces.map((piece) => {
+                  if (!piece.box2d) return null;
+                  const [yMin, xMin, yMax, xMax] = piece.box2d;
+                  const x = (xMin / 1000) * lastRawImageData.width;
+                  const y = (yMin / 1000) * lastRawImageData.height;
+                  const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
+                  const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
+                  const isEditing = editingPieceId === piece.id;
+                  const isHorizontal = width >= height;
+                  const halfCenters = isHorizontal
+                    ? [
+                        { x: x + width * 0.25, y: y + height * 0.5, value: piece.sideA },
+                        { x: x + width * 0.75, y: y + height * 0.5, value: piece.sideB },
+                      ]
+                    : [
+                        { x: x + width * 0.5, y: y + height * 0.25, value: piece.sideA },
+                        { x: x + width * 0.5, y: y + height * 0.75, value: piece.sideB },
+                      ];
+                  return (
+                    <g key={piece.id}>
+                      <rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={height}
+                        rx={Math.max(4, Math.min(width, height) * 0.04)}
+                        fill="transparent"
+                        stroke="transparent"
+                        strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
+                        vectorEffect="non-scaling-stroke"
+                        pointerEvents="all"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Editar peça ${piece.label}: lado A ${piece.sideA}, lado B ${piece.sideB}`}
+                        aria-pressed={isEditing}
+                        className="cursor-pointer"
+                        onClick={() => handleStartPieceEdit(piece)}
+                        onDoubleClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleOpenPieceEditorPopup(piece);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleStartPieceEdit(piece);
+                          }
+                        }}
+                      >
+                        <title>{`Editar ${piece.label}: ${piece.sideA} e ${piece.sideB}`}</title>
+                      </rect>
+                      {halfCenters.map((half, halfIndex) => {
+                        const halfX = isHorizontal
+                          ? (halfIndex === 0 ? x : x + width / 2)
+                          : x;
+                        const halfY = isHorizontal
+                          ? y
+                          : (halfIndex === 0 ? y : y + height / 2);
+                        const halfWidth = isHorizontal ? width / 2 : width;
+                        const halfHeight = isHorizontal ? height : height / 2;
+                        const labelFontSize = Math.max(16, Math.min(34, Math.min(halfWidth, halfHeight) * 0.24));
+                        const labelPadding = Math.max(5, labelFontSize * 0.22);
+                        const labelWidth = Math.max(labelFontSize * 1.05, String(half.value).length * labelFontSize * 0.68 + labelPadding * 2);
+                        const labelHeight = labelFontSize * 1.35;
+                        const stroke = isEditing ? "#f59e0b" : "#4faaa7";
+                        return (
+                          <g key={halfIndex} pointerEvents="none">
+                            <rect
+                              x={halfX + 1}
+                              y={halfY + 1}
+                              width={Math.max(0, halfWidth - 2)}
+                              height={Math.max(0, halfHeight - 2)}
+                              rx={Math.max(4, Math.min(halfWidth, halfHeight) * 0.045)}
+                              fill={isEditing ? "rgba(245, 158, 11, 0.20)" : "rgba(16, 185, 129, 0.07)"}
+                              stroke={stroke}
+                              strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <rect
+                              x={halfX + labelPadding}
+                              y={halfY + labelPadding}
+                              width={labelWidth}
+                              height={labelHeight}
+                              rx={Math.max(4, labelFontSize * 0.2)}
+                              fill="rgba(20, 20, 20, 0.72)"
+                            />
+                            <text
+                              x={halfX + labelPadding * 2}
+                              y={halfY + labelPadding + labelFontSize * 0.98}
+                              textAnchor="start"
+                              fontSize={labelFontSize}
+                              fontFamily="Georgia, serif"
+                              fontWeight="bold"
+                              fill="#fff8e8"
+                            >
+                              {half.value}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                })}
+                <text
+                  x={lastRawImageData.width / 2}
+                  y={lastRawImageData.height * 0.12}
+                  textAnchor="middle"
+                  fontSize={Math.max(36, Math.min(72, lastRawImageData.width * 0.06))}
+                  fontFamily="Georgia, serif"
+                  fill="#f5e8c2"
+                  stroke="rgba(0, 0, 0, 0.72)"
+                  strokeWidth="5"
+                  paintOrder="stroke"
+                  pointerEvents="none"
+                >
+                  Soma: {visionResult.totalPoints}
+                </text>
+              </svg>
+            )}
+          </>
+        )}
+
+        {/* Toggle overlay badge when image is available */}
+        {capturedImage && overlayImage && !streamActive && (
+          <div className="absolute bottom-3 right-3 z-10">
+            <button
+              type="button"
+              onClick={() => setShowOverlay(!showOverlay)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 hover:bg-black text-white text-xs font-bold backdrop-blur-xs border border-white/20 shadow-md transition-all"
+            >
+              <Eye className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{showOverlay ? 'Ver Foto Limpa' : 'Ver Caixas e Pips'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* Viewfinder Target Guidelines */}
+        {(streamActive || capturedImage) && (
+          <div className="absolute inset-4 pointer-events-none border-2 border-white/20 rounded-xl flex flex-col justify-between p-2">
+            <div className="flex justify-between">
+              <div className="w-4 h-4 border-t-2 border-l-2 border-emerald-400" />
+              <div className="w-4 h-4 border-t-2 border-r-2 border-emerald-400" />
+            </div>
+            <div className="flex justify-between">
+              <div className="w-4 h-4 border-b-2 border-l-2 border-emerald-400" />
+              <div className="w-4 h-4 border-b-2 border-r-2 border-emerald-400" />
+            </div>
+          </div>
+        )}
+
+        {/* Analyzing Overlay Spinner */}
+        {isAnalyzing && (
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center z-20 space-y-3">
+            <div className="w-12 h-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
+            <div className="text-center">
+              <p className="text-sm font-bold text-white">
+                {engineMode === 'offline'
+                  ? 'Processando Visão Offline Multi-Peças...'
+                  : 'Catalogando Peças com IA Gemini...'}
+              </p>
+              <p className="text-xs text-emerald-300">
+                Segmentando e catalogando dominós um a um
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Camera Error Notice if any */}
+      {cameraError && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/50 rounded-xl text-xs text-amber-800 dark:text-amber-300">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{cameraError}</span>
+        </div>
+      )}
+
+      {/* Action Buttons Bar */}
+      <div className={`grid grid-cols-2 sm:grid-cols-2 gap-2 ${streamActive ? 'hidden' : ''}`}>
+        {!streamActive ? (
+          <button
+            type="button"
+            onClick={startCamera}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all"
+          >
+            <Camera className="w-4 h-4" />
+            <span>Abrir Câmera</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleCaptureSnapshot}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all animate-pulse"
+          >
+            <Check className="w-4 h-4" />
+            <span>Tirar Foto</span>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-semibold text-xs border border-zinc-200 dark:border-zinc-700 transition-all"
+        >
+          <Upload className="w-4 h-4" />
+          <span>Escolher da Galeria</span>
+        </button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+          aria-label="Selecionar fotografia da galeria"
+          className="hidden"
+          onChange={handleFileUpload}
+        />
+      </div>
+
+      {/* Manual Add Piece Panel */}
+      {showManualAdd && (
+        <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-2xl border border-emerald-500/40 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+              Adicionar Peça de Dominó Manualmente:
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowManualAdd(false)}
+              className="text-xs text-zinc-400 hover:text-zinc-600"
+            >
+              Cancelar
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 flex items-center gap-1.5">
+              <label htmlFor="cam-manual-side-a" className="text-xs text-zinc-500">Lado A:</label>
+              <select
+                id="cam-manual-side-a"
+                aria-label="Lado A do dominó"
+                value={manualA}
+                onChange={(e) => setManualA(Number(e.target.value))}
+                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
+              >
+                {Array.from({ length: 13 }).map((_, i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1 flex items-center gap-1.5">
+              <label htmlFor="cam-manual-side-b" className="text-xs text-zinc-500">Lado B:</label>
+              <select
+                id="cam-manual-side-b"
+                aria-label="Lado B do dominó"
+                value={manualB}
+                onChange={(e) => setManualB(Number(e.target.value))}
+                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
+              >
+                {Array.from({ length: 13 }).map((_, i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddManualPiece}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-95 transition-all"
+            >
+              Inserir [{Math.min(manualA, manualB)}|{Math.max(manualA, manualB)}]
+            </button>
           </div>
         </div>
+      )}
 
+      {/* Detection Results & Scores Breakdown with Individual Editing */}
+      {visionResult && (
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm space-y-4">
+          {/* Piece count stays outside the unchanged total-score indicator. */}
+          <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <span className="text-xl font-black text-zinc-600 dark:text-zinc-300">
+              {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'Peça' : 'Peças'} com total de:
+            </span>
+            <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
+              {visionResult.totalPoints} pts
+            </div>
+          </div>
+
+          {visionResult.warning && !visionResult.warning.includes('Processamento 100% offline ativo no dispositivo') && (
+            <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-300">
+              {visionResult.warning}
+            </div>
+          )}
+
+          {/* List of Detected Pieces with individual scores and INLINE EDITING */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              <span>Toque duas vezes na peça para editar</span>
+              <button
+                type="button"
+                onClick={() => setShowManualAdd(true)}
+                className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 hover:underline"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Adicionar</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {visionResult.pieces.map((piece, index) => {
+                const isEditing = editingPieceId === piece.id;
+
+                return (
+                  <div
+                    key={piece.id}
+                    className={`p-3 rounded-xl border transition-all ${
+                      isEditing
+                        ? 'bg-amber-50/60 dark:bg-amber-950/30 border-amber-500 shadow-xs'
+                        : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
+                    }`}
+                  >
+                    {isEditing ? (
+                      /* Inline Editor for this piece */
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                            Peça #{index + 1}: [{editSideA}|{editSideB}] ({editSideA + editSideB} pts):
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSavePieceEdit(piece.id)}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-xs hover:bg-emerald-700"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Gravar</span>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 flex items-center gap-1.5">
+                            <span className="text-[11px] text-zinc-500 font-semibold">Lado A:</span>
+                            <select
+                              aria-label="Editar Lado A da peça"
+                              value={editSideA}
+                              onChange={(e) => setEditSideA(Number(e.target.value))}
+                              className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
+                            >
+                              {Array.from({ length: 13 }).map((_, i) => (
+                                <option key={i} value={i}>
+                                  {i}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex-1 flex items-center gap-1.5">
+                            <span className="text-[11px] text-zinc-500 font-semibold">Lado B:</span>
+                            <select
+                              aria-label="Editar Lado B da peça"
+                              value={editSideB}
+                              onChange={(e) => setEditSideB(Number(e.target.value))}
+                              className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
+                            >
+                              {Array.from({ length: 13 }).map((_, i) => (
+                                <option key={i} value={i}>
+                                  {i}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Normal View with Edit/Remove buttons */
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div
+                                className="cursor-pointer"
+                                title="Toque duas vezes para abrir o editor"
+                                onDoubleClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleOpenPieceEditorPopup(piece);
+                                }}
+                              >
+                                <DominoPiece sideA={piece.sideA} sideB={piece.sideB} size="sm" />
+                              </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-black text-zinc-400">#{index + 1}</span>
+                              <p className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
+                                {piece.label}
+                              </p>
+                            </div>
+                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                              {piece.sideA === piece.sideB
+                                ? `Duplo de ${piece.sideA}`
+                                : `${piece.sideA} + ${piece.sideB} = ${piece.points} pts`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200">
+                            {piece.points} pts
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleStartPieceEdit(piece)}
+                            aria-label={`Editar peça ${piece.label}`}
+                            className="p-1.5 text-zinc-400 hover:text-amber-500 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                            title="Editar valores desta peça"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePiece(piece.id)}
+                            aria-label={`Excluir peça ${piece.label}`}
+                            className="p-1.5 text-zinc-400 hover:text-red-500 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                            title="Remover peça da contagem"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Action Row: Assign to Player */}
+          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="flex-1 flex items-center gap-2">
+                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                  Atribuir a:
+                </span>
+                <select
+                  aria-label="Selecionar jogador para atribuir pontuação"
+                  value={selectedPlayerId}
+                  onChange={(e) => setSelectedPlayerId(e.target.value)}
+                  className="flex-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs font-bold text-zinc-900 dark:text-zinc-100"
+                >
+                  {players.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.avatar} {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleConfirmAssign}
+                disabled={visionResult.pieces.length === 0}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+              >
+                {assignSuccess ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-200" />
+                    <span>Pontos e {visionResult.pieces.length} Peças Salvas!</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Gravar {visionResult.totalPoints} pts na Rodada {currentRound}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header Banner */}
+      <div className="rounded-2xl bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-4 shadow-sm">
         {/* Engine Selector Segmented Control */}
-        <div className="mt-3.5 pt-3 border-t border-white/20">
+        <div className="pt-0">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
             <span className="text-[11px] font-semibold text-emerald-100 flex items-center gap-1">
               <Zap className="w-3.5 h-3.5 text-amber-300" />
@@ -785,596 +1407,113 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         </div>
       )}
 
-      {/* Manual Add Piece Panel */}
-      {showManualAdd && (
-        <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-2xl border border-emerald-500/40 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              Adicionar Peça de Dominó Manualmente:
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowManualAdd(false)}
-              className="text-xs text-zinc-400 hover:text-zinc-600"
-            >
-              Cancelar
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 flex items-center gap-1.5">
-              <label htmlFor="cam-manual-side-a" className="text-xs text-zinc-500">Lado A:</label>
-              <select
-                id="cam-manual-side-a"
-                aria-label="Lado A do dominó"
-                value={manualA}
-                onChange={(e) => setManualA(Number(e.target.value))}
-                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
-              >
-                {Array.from({ length: 13 }).map((_, i) => (
-                  <option key={i} value={i}>
-                    {i}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex-1 flex items-center gap-1.5">
-              <label htmlFor="cam-manual-side-b" className="text-xs text-zinc-500">Lado B:</label>
-              <select
-                id="cam-manual-side-b"
-                aria-label="Lado B do dominó"
-                value={manualB}
-                onChange={(e) => setManualB(Number(e.target.value))}
-                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
-              >
-                {Array.from({ length: 13 }).map((_, i) => (
-                  <option key={i} value={i}>
-                    {i}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleAddManualPiece}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-95 transition-all"
-            >
-              Inserir [{Math.min(manualA, manualB)}|{Math.max(manualA, manualB)}]
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Camera / Viewfinder Box */}
-      <div className={streamActive ? "fixed inset-0 z-[100] h-[100dvh] w-screen overflow-hidden bg-black flex flex-col items-center justify-center" : "relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm aspect-4/3 flex flex-col items-center justify-center"}>
-        {/* Live Video Feed */}
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          className={`absolute inset-0 w-full h-full ${streamActive ? 'object-cover block' : 'object-cover hidden'}`}
-        />
-        {streamActive && (
-          <>
-            <button
-              type="button"
-              onClick={stopCamera}
-              aria-label="Fechar câmara"
-              className="absolute top-5 left-5 z-30 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm border border-white/30"
-            >
-              <span aria-hidden="true" className="text-2xl leading-none">×</span>
-            </button>
-            <div className="absolute bottom-8 left-0 right-0 z-30 flex justify-center">
-              <button
-                type="button"
-                onClick={handleCaptureSnapshot}
-                aria-label="Tirar fotografia"
-                className="flex h-[76px] w-[76px] items-center justify-center rounded-full border-[5px] border-white bg-white/25 shadow-xl active:scale-95 transition-transform"
-              >
-                <span className="h-[56px] w-[56px] rounded-full bg-white" />
-              </button>
-            </div>
-            <div className="absolute top-6 right-5 z-30 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
-              Câmara ativa
-            </div>
-            <div
-              className="absolute top-20 left-1/2 z-30 -translate-x-1/2 max-w-[90vw] rounded-2xl border border-white/25 bg-black/70 px-4 py-2 text-center text-white shadow-lg backdrop-blur-sm"
-              aria-live="polite"
-              aria-label={`Pré-contagem: ${livePieces.length} peças, ${livePieces.reduce((sum, piece) => sum + piece.points, 0)} pontos`}
-            >
-              <div className="text-sm font-black">
-                {livePieces.length} {livePieces.length === 1 ? 'peça' : 'peças'} · {livePieces.reduce((sum, piece) => sum + piece.points, 0)} pts
-              </div>
-              <div className="mt-0.5 max-w-full truncate text-[11px] font-semibold text-emerald-200">
-                {livePieces.length
-                  ? livePieces.map((piece) => `[${piece.sideA}|${piece.sideB}]`).join('  ')
-                  : 'A procurar dominós…'}
-              </div>
-              <div className="mt-0.5 text-[9px] text-white/65">Pré-contagem offline · confirma após fotografar</div>
-            </div>
-            {livePieces.length > 0 && videoRef.current?.videoWidth && videoRef.current?.videoHeight && (
-              <svg
-                aria-label="Pré-contagem visual: cada metade do dominó está contornada e identificada"
-                viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
-                preserveAspectRatio="xMidYMid slice"
-                className="absolute inset-0 z-20 h-full w-full pointer-events-none"
-              >
-                {livePieces.map((piece) => {
-                  if (!piece.box2d) return null;
-                  const [yMin, xMin, yMax, xMax] = piece.box2d;
-                  const px = (xMin / 1000) * videoRef.current!.videoWidth;
-                  const py = (yMin / 1000) * videoRef.current!.videoHeight;
-                  const pw = ((xMax - xMin) / 1000) * videoRef.current!.videoWidth;
-                  const ph = ((yMax - yMin) / 1000) * videoRef.current!.videoHeight;
-                  const horizontal = pw >= ph;
-                  return [piece.sideA, piece.sideB].map((value, index) => {
-                    const hx = horizontal ? px + (index * pw) / 2 : px;
-                    const hy = horizontal ? py : py + (index * ph) / 2;
-                    const hw = horizontal ? pw / 2 : pw;
-                    const hh = horizontal ? ph : ph / 2;
-                    const fontSize = Math.max(16, Math.min(34, Math.min(hw, hh) * 0.24));
-                    const pad = Math.max(5, fontSize * 0.22);
-                    const labelWidth = Math.max(fontSize * 1.05, String(value).length * fontSize * 0.68 + pad * 2);
-                    const labelHeight = fontSize * 1.35;
-                    return (
-                      <g key={`${piece.id}-half-${index}`}>
-                        <rect
-                          x={hx + 1}
-                          y={hy + 1}
-                          width={Math.max(0, hw - 2)}
-                          height={Math.max(0, hh - 2)}
-                          rx={Math.max(4, Math.min(hw, hh) * 0.045)}
-                          fill="rgba(16, 185, 129, 0.07)"
-                          stroke="#4faaa7"
-                          strokeWidth="4"
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        <rect
-                          x={hx + pad}
-                          y={hy + pad}
-                          width={labelWidth}
-                          height={labelHeight}
-                          rx={Math.max(4, fontSize * 0.2)}
-                          fill="rgba(20, 20, 20, 0.72)"
-                        />
-                        <text
-                          x={hx + pad * 2}
-                          y={hy + pad + fontSize * 0.98}
-                          textAnchor="start"
-                          fontSize={fontSize}
-                          fontFamily="Georgia, serif"
-                          fontWeight="bold"
-                          fill="#fff8e8"
-                        >
-                          {value}
-                        </text>
-                      </g>
-                    );
-                  });
-                })}
-              </svg>
-            )}
-          </>
-        )}
-
-        {/* Captured Image / CV Overlay View */}
-        {capturedImage && !streamActive && (
-          <>
-            <img
-              src={showOverlay && overlayImage ? overlayImage : capturedImage}
-              alt="Foto do conjunto de dominós processada"
-              className="absolute inset-0 w-full h-full object-contain bg-zinc-950"
-            />
-            {visionResult && lastRawImageData && visionResult.pieces.some((piece) => piece.box2d) && (
-              <svg
-                aria-label="Peças detetadas. Toque numa peça para a editar."
-                role="group"
-                viewBox={`0 0 ${lastRawImageData.width} ${lastRawImageData.height}`}
-                preserveAspectRatio="xMidYMid meet"
-                className="absolute inset-0 z-[5] w-full h-full"
-              >
-                {visionResult.pieces.map((piece) => {
-                  if (!piece.box2d) return null;
-                  const [yMin, xMin, yMax, xMax] = piece.box2d;
-                  const x = (xMin / 1000) * lastRawImageData.width;
-                  const y = (yMin / 1000) * lastRawImageData.height;
-                  const width = ((xMax - xMin) / 1000) * lastRawImageData.width;
-                  const height = ((yMax - yMin) / 1000) * lastRawImageData.height;
-                  const isEditing = editingPieceId === piece.id;
-                  const isHorizontal = width >= height;
-                  const halfCenters = isHorizontal
-                    ? [
-                        { x: x + width * 0.25, y: y + height * 0.5, value: piece.sideA },
-                        { x: x + width * 0.75, y: y + height * 0.5, value: piece.sideB },
-                      ]
-                    : [
-                        { x: x + width * 0.5, y: y + height * 0.25, value: piece.sideA },
-                        { x: x + width * 0.5, y: y + height * 0.75, value: piece.sideB },
-                      ];
-                  return (
-                    <g key={piece.id}>
-                      <rect
-                        x={x}
-                        y={y}
-                        width={width}
-                        height={height}
-                        rx={Math.max(4, Math.min(width, height) * 0.04)}
-                        fill="transparent"
-                        stroke="transparent"
-                        strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
-                        vectorEffect="non-scaling-stroke"
-                        pointerEvents="all"
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Editar peça ${piece.label}: lado A ${piece.sideA}, lado B ${piece.sideB}`}
-                        aria-pressed={isEditing}
-                        className="cursor-pointer"
-                        onClick={() => handleStartPieceEdit(piece)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            handleStartPieceEdit(piece);
-                          }
-                        }}
-                      >
-                        <title>{`Editar ${piece.label}: ${piece.sideA} e ${piece.sideB}`}</title>
-                      </rect>
-                      {halfCenters.map((half, halfIndex) => {
-                        const halfX = isHorizontal
-                          ? (halfIndex === 0 ? x : x + width / 2)
-                          : x;
-                        const halfY = isHorizontal
-                          ? y
-                          : (halfIndex === 0 ? y : y + height / 2);
-                        const halfWidth = isHorizontal ? width / 2 : width;
-                        const halfHeight = isHorizontal ? height : height / 2;
-                        const labelFontSize = Math.max(16, Math.min(34, Math.min(halfWidth, halfHeight) * 0.24));
-                        const labelPadding = Math.max(5, labelFontSize * 0.22);
-                        const labelWidth = Math.max(labelFontSize * 1.05, String(half.value).length * labelFontSize * 0.68 + labelPadding * 2);
-                        const labelHeight = labelFontSize * 1.35;
-                        const stroke = isEditing ? "#f59e0b" : "#4faaa7";
-                        return (
-                          <g key={halfIndex} pointerEvents="none">
-                            <rect
-                              x={halfX + 1}
-                              y={halfY + 1}
-                              width={Math.max(0, halfWidth - 2)}
-                              height={Math.max(0, halfHeight - 2)}
-                              rx={Math.max(4, Math.min(halfWidth, halfHeight) * 0.045)}
-                              fill={isEditing ? "rgba(245, 158, 11, 0.20)" : "rgba(16, 185, 129, 0.07)"}
-                              stroke={stroke}
-                              strokeWidth={Math.max(3, lastRawImageData.width * 0.004)}
-                              vectorEffect="non-scaling-stroke"
-                            />
-                            <rect
-                              x={halfX + labelPadding}
-                              y={halfY + labelPadding}
-                              width={labelWidth}
-                              height={labelHeight}
-                              rx={Math.max(4, labelFontSize * 0.2)}
-                              fill="rgba(20, 20, 20, 0.72)"
-                            />
-                            <text
-                              x={halfX + labelPadding * 2}
-                              y={halfY + labelPadding + labelFontSize * 0.98}
-                              textAnchor="start"
-                              fontSize={labelFontSize}
-                              fontFamily="Georgia, serif"
-                              fontWeight="bold"
-                              fill="#fff8e8"
-                            >
-                              {half.value}
-                            </text>
-                          </g>
-                        );
-                      })}
-                    </g>
-                  );
-                })}
-                <text
-                  x={lastRawImageData.width / 2}
-                  y={lastRawImageData.height - Math.max(24, lastRawImageData.height * 0.035)}
-                  textAnchor="middle"
-                  fontSize={Math.max(28, Math.min(58, lastRawImageData.width * 0.045))}
-                  fontFamily="Georgia, serif"
-                  fill="#f5e8c2"
-                  stroke="rgba(0, 0, 0, 0.72)"
-                  strokeWidth="5"
-                  paintOrder="stroke"
-                  pointerEvents="none"
-                >
-                  Soma: {visionResult.totalPoints}
-                </text>
-              </svg>
-            )}
-          </>
-        )}
-
-        {/* Toggle overlay badge when image is available */}
-        {capturedImage && overlayImage && !streamActive && (
-          <div className="absolute bottom-3 right-3 z-10">
-            <button
-              type="button"
-              onClick={() => setShowOverlay(!showOverlay)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 hover:bg-black text-white text-xs font-bold backdrop-blur-xs border border-white/20 shadow-md transition-all"
-            >
-              <Eye className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{showOverlay ? 'Ver Foto Limpa' : 'Ver Caixas e Pips'}</span>
-            </button>
-          </div>
-        )}
-
-        {/* Viewfinder Target Guidelines */}
-        {(streamActive || capturedImage) && (
-          <div className="absolute inset-4 pointer-events-none border-2 border-white/20 rounded-xl flex flex-col justify-between p-2">
-            <div className="flex justify-between">
-              <div className="w-4 h-4 border-t-2 border-l-2 border-emerald-400" />
-              <div className="w-4 h-4 border-t-2 border-r-2 border-emerald-400" />
-            </div>
-            <div className="flex justify-between">
-              <div className="w-4 h-4 border-b-2 border-l-2 border-emerald-400" />
-              <div className="w-4 h-4 border-b-2 border-r-2 border-emerald-400" />
-            </div>
-          </div>
-        )}
-
-        {/* Analyzing Overlay Spinner */}
-        {isAnalyzing && (
-          <div className="absolute inset-0 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center z-20 space-y-3">
-            <div className="w-12 h-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
-            <div className="text-center">
-              <p className="text-sm font-bold text-white">
-                {engineMode === 'offline'
-                  ? 'Processando Visão Offline Multi-Peças...'
-                  : 'Catalogando Peças com IA Gemini...'}
-              </p>
-              <p className="text-xs text-emerald-300">
-                Segmentando e catalogando dominós um a um
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Camera Error Notice if any */}
-      {cameraError && (
-        <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/50 rounded-xl text-xs text-amber-800 dark:text-amber-300">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{cameraError}</span>
-        </div>
-      )}
-
-      {/* Action Buttons Bar */}
-      <div className={`grid grid-cols-2 sm:grid-cols-2 gap-2 ${streamActive ? 'hidden' : ''}`}>
-        {!streamActive ? (
-          <button
-            type="button"
-            onClick={startCamera}
-            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all"
-          >
-            <Camera className="w-4 h-4" />
-            <span>Abrir Câmera</span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleCaptureSnapshot}
-            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all animate-pulse"
-          >
-            <Check className="w-4 h-4" />
-            <span>Tirar Foto</span>
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-semibold text-xs border border-zinc-200 dark:border-zinc-700 transition-all"
+      {offlineProcessingNotice && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300"
         >
-          <Upload className="w-4 h-4" />
-          <span>Escolher da Galeria</span>
-        </button>
+          <Cpu className="h-4 w-4 shrink-0" />
+          <span>Processamento 100% offline ativo no dispositivo.</span>
+        </div>
+      )}
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-          aria-label="Selecionar fotografia da galeria"
-          className="hidden"
-          onChange={handleFileUpload}
-        />
-      </div>
 
-      {/* Detection Results & Scores Breakdown with Individual Editing */}
-      {visionResult && (
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm space-y-4">
-          {/* Total score only; recognition metadata and redundant piece-count labels are hidden. */}
-          <div className="flex justify-end border-b border-zinc-100 dark:border-zinc-800 pb-3">
-            <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
-              {visionResult.totalPoints} pts
-            </div>
-          </div>
 
-          {visionResult.warning && (
-            <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-300">
-              {visionResult.warning}
-            </div>
-          )}
-
-          {/* List of Detected Pieces with individual scores and INLINE EDITING */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-              <span>Peças Identificadas (toque na peça na imagem ou no lápis para editar):</span>
+      {isPieceEditorPopupOpen && editingPieceId && visionResult && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsPieceEditorPopupOpen(false);
+              setEditingPieceId(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="detected-piece-editor-title"
+            className="w-full max-w-sm space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 id="detected-piece-editor-title" className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
+                  Editar peça selecionada
+                </h3>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Altera os valores dos dois lados do dominó.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowManualAdd(true)}
-                className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 hover:underline"
+                aria-label="Fechar editor da peça"
+                onClick={() => {
+                  setIsPieceEditorPopupOpen(false);
+                  setEditingPieceId(null);
+                }}
+                className="rounded-lg px-2 py-1 text-xl text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Adicionar mais uma</span>
+                ×
               </button>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {visionResult.pieces.map((piece, index) => {
-                const isEditing = editingPieceId === piece.id;
-
-                return (
-                  <div
-                    key={piece.id}
-                    className={`p-3 rounded-xl border transition-all ${
-                      isEditing
-                        ? 'bg-amber-50/60 dark:bg-amber-950/30 border-amber-500 shadow-xs'
-                        : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
-                    }`}
-                  >
-                    {isEditing ? (
-                      /* Inline Editor for this piece */
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-amber-900 dark:text-amber-300">
-                            Peça #{index + 1}: [{editSideA}|{editSideB}] ({editSideA + editSideB} pts):
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleSavePieceEdit(piece.id)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-xs hover:bg-emerald-700"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Gravar</span>
-                          </button>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1 flex items-center gap-1.5">
-                            <span className="text-[11px] text-zinc-500 font-semibold">Lado A:</span>
-                            <select
-                              aria-label="Editar Lado A da peça"
-                              value={editSideA}
-                              onChange={(e) => setEditSideA(Number(e.target.value))}
-                              className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
-                            >
-                              {Array.from({ length: 13 }).map((_, i) => (
-                                <option key={i} value={i}>
-                                  {i}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="flex-1 flex items-center gap-1.5">
-                            <span className="text-[11px] text-zinc-500 font-semibold">Lado B:</span>
-                            <select
-                              aria-label="Editar Lado B da peça"
-                              value={editSideB}
-                              onChange={(e) => setEditSideB(Number(e.target.value))}
-                              className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
-                            >
-                              {Array.from({ length: 13 }).map((_, i) => (
-                                <option key={i} value={i}>
-                                  {i}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Normal View with Edit/Remove buttons */
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <DominoPiece sideA={piece.sideA} sideB={piece.sideB} size="sm" />
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-black text-zinc-400">#{index + 1}</span>
-                              <p className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
-                                {piece.label}
-                              </p>
-                            </div>
-                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                              {piece.sideA === piece.sideB
-                                ? `Duplo de ${piece.sideA}`
-                                : `${piece.sideA} + ${piece.sideB} = ${piece.points} pts`}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-black px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200">
-                            {piece.points} pts
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleStartPieceEdit(piece)}
-                            aria-label={`Editar peça ${piece.label}`}
-                            className="p-1.5 text-zinc-400 hover:text-amber-500 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                            title="Editar valores desta peça"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRemovePiece(piece.id)}
-                            aria-label={`Excluir peça ${piece.label}`}
-                            className="p-1.5 text-zinc-400 hover:text-red-500 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                            title="Remover peça da contagem"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Action Row: Assign to Player */}
-          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <div className="flex-1 flex items-center gap-2">
-                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
-                  Atribuir a:
-                </span>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                Lado A
                 <select
-                  aria-label="Selecionar jogador para atribuir pontuação"
-                  value={selectedPlayerId}
-                  onChange={(e) => setSelectedPlayerId(e.target.value)}
-                  className="flex-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs font-bold text-zinc-900 dark:text-zinc-100"
+                  aria-label="Lado A da peça selecionada"
+                  value={editSideA}
+                  onChange={(event) => setEditSideA(Number(event.target.value))}
+                  className="w-full rounded-xl border border-zinc-300 bg-zinc-50 p-3 text-base font-bold text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
                 >
-                  {players.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.avatar} {p.name}
-                    </option>
+                  {Array.from({ length: 13 }).map((_, index) => (
+                    <option key={index} value={index}>{index}</option>
                   ))}
                 </select>
-              </div>
-
+              </label>
+              <label className="space-y-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                Lado B
+                <select
+                  aria-label="Lado B da peça selecionada"
+                  value={editSideB}
+                  onChange={(event) => setEditSideB(Number(event.target.value))}
+                  className="w-full rounded-xl border border-zinc-300 bg-zinc-50 p-3 text-base font-bold text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+                >
+                  {Array.from({ length: 13 }).map((_, index) => (
+                    <option key={index} value={index}>{index}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-zinc-100 px-3 py-2 dark:bg-zinc-800">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Nova pontuação</span>
+              <span className="text-lg font-black text-emerald-600 dark:text-emerald-400">{editSideA + editSideB} pts</span>
+            </div>
+            <div className="flex gap-2">
               <button
                 type="button"
-                onClick={handleConfirmAssign}
-                disabled={visionResult.pieces.length === 0}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+                onClick={() => {
+                  setIsPieceEditorPopupOpen(false);
+                  setEditingPieceId(null);
+                }}
+                className="flex-1 rounded-xl border border-zinc-300 px-3 py-2.5 text-xs font-bold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
               >
-                {assignSuccess ? (
-                  <>
-                    <Check className="w-4 h-4 text-emerald-200" />
-                    <span>Pontos e {visionResult.pieces.length} Peças Salvas!</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>Gravar {visionResult.totalPoints} pts na Rodada {currentRound}</span>
-                  </>
-                )}
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleSavePieceEdit(editingPieceId);
+                  setIsPieceEditorPopupOpen(false);
+                }}
+                className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white hover:bg-emerald-700"
+              >
+                Guardar peça
               </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

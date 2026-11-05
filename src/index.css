@@ -1,1 +1,4 @@
 @import "tailwindcss";
+
+/* Make dark: utilities follow the in-app theme toggle, not the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
