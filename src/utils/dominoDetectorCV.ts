@@ -1048,36 +1048,10 @@ export function detectDominoesOffline(
     threshold = computeOtsuThreshold(gray);
   }
 
-  // Prefer circle-gradient detection for real photographic tiles. It is robust
-  // to highlights that turn gray/yellow pips into bright blobs in grayscale.
+  // Circle-gradient detector complements the body and local-contrast paths.
+  // Keep both proposals until the end so a partial Hough grouping cannot hide
+  // valid pieces recovered by the independent body segmentation.
   const radialTiles = detectDominoesByRadialVoting(rgbaPixels, width, height);
-  if (radialTiles.length > 0) {
-    const radialPieces: DetectedPiece[] = radialTiles.map((tile) => ({
-      id: tile.id,
-      sideA: tile.sideA,
-      sideB: tile.sideB,
-      points: tile.points,
-      label: tile.label,
-      confidence: tile.confidence,
-      box2d: [
-        Math.round((tile.bbox.y / height) * 1000),
-        Math.round((tile.bbox.x / width) * 1000),
-        Math.round(((tile.bbox.y + tile.bbox.height) / height) * 1000),
-        Math.round(((tile.bbox.x + tile.bbox.width) / width) * 1000),
-      ],
-    }));
-    const radialPips = radialTiles.reduce((sum, tile) => sum + tile.points, 0);
-    return {
-      pieces: radialPieces,
-      tiles: radialTiles,
-      totalPoints: radialPieces.reduce((sum, piece) => sum + piece.points, 0),
-      source: 'offline_cv',
-      processingTimeMs: Math.round(performance.now() - startTime),
-      tilesCount: radialTiles.length,
-      pipsTotal: radialPips,
-      thresholdUsed: threshold,
-    };
-  }
 
   // 1. Detect Pips with both adaptive local contrast and the classic threshold.
   // The adaptive mask retains glossy yellow/grey pips when their luminance is
@@ -1178,6 +1152,48 @@ export function detectDominoesOffline(
       }
     }
   }
+
+  // Merge independent detectors by physical-box overlap. Keep the candidate
+  // with the stronger point evidence for each tile; retain non-overlapping
+  // proposals from either path so one incomplete detector cannot suppress pieces.
+  const mergedTiles = [...detectedTiles];
+  const intersectionOverUnion = (
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number }
+  ) => {
+    const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+    const x2 = Math.min(a.x + a.width, b.x + b.width);
+    const y2 = Math.min(a.y + a.height, b.y + b.height);
+    const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const union = a.width * a.height + b.width * b.height - intersection;
+    return union > 0 ? intersection / union : 0;
+  };
+
+  for (const radial of radialTiles) {
+    let bestIndex = -1;
+    let bestOverlap = 0;
+    for (let i = 0; i < mergedTiles.length; i++) {
+      const overlap = intersectionOverUnion(mergedTiles[i].bbox, radial.bbox);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestOverlap < 0.28) {
+      mergedTiles.push(radial);
+      continue;
+    }
+
+    const current = mergedTiles[bestIndex];
+    const currentPips = current.halfA.pips.length + current.halfB.pips.length;
+    const radialPips = radial.halfA.pips.length + radial.halfB.pips.length;
+    const currentEvidence = currentPips + current.confidence * 2;
+    const radialEvidence = radialPips + radial.confidence * 2;
+    if (radialEvidence > currentEvidence) mergedTiles[bestIndex] = radial;
+  }
+
+  detectedTiles.splice(0, detectedTiles.length, ...mergedTiles);
 
   // Sort tiles from highest score to lowest (standard domino cataloging order)
   detectedTiles.sort((a, b) => b.points - a.points);
