@@ -829,7 +829,7 @@ export function detectPipsByRadialVoting(
     }
   }
 
-  let thresholdCount = Math.ceil(edgeCount * 0.12);
+  let thresholdCount = Math.ceil(edgeCount * 0.88);
   let accumulated = 0;
   let edgeThreshold = 0;
   for (let i = 0; i < histogram.length; i++) {
@@ -1095,7 +1095,7 @@ export function detectDominoesOffline(
 
   // Reject tiny specks and oversized regions at the connected-component stage.
   const minTileArea = (width * height) * 0.00045;
-  const maxTileArea = (width * height) * 0.07;
+  const maxTileArea = (width * height) * 0.14;
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
