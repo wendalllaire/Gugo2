@@ -47,6 +47,9 @@ export const RankingTab: React.FC<RankingTabProps> = ({
   const [showConfig, setShowConfig] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [shareSuccessToast, setShareSuccessToast] = useState<string | null>(null);
+  const [editingPlayer, setEditingPlayer] = useState<{ id: string; name: string; avatar: string } | null>(null);
+  const [roundActionIndex, setRoundActionIndex] = useState<number | null>(null);
+  const [roundMoveTarget, setRoundMoveTarget] = useState<number>(0);
 
   // Piece Editor Modal State
   const [modalState, setModalState] = useState<{
@@ -103,6 +106,42 @@ export const RankingTab: React.FC<RankingTabProps> = ({
     };
     onUpdatePlayers([...players, newPlayer]);
     setNewPlayerName('');
+  };
+
+  const handleSavePlayerIdentity = () => {
+    if (!editingPlayer) return;
+    onUpdatePlayers(players.map((p) => p.id === editingPlayer.id ? { ...p, name: editingPlayer.name.trim() || p.name, avatar: editingPlayer.avatar.trim() || '👤' } : p));
+    setEditingPlayer(null);
+  };
+
+  const handleDeleteRound = (roundIndex: number) => {
+    if (settings.maxRounds <= 1) return;
+    const updatedPlayers = players.map((p) => {
+      const scores = [...p.scores]; scores.splice(roundIndex, 1);
+      const roundPieces: Record<number, DominoTile[]> = {};
+      Object.entries(p.roundPieces || {}).forEach(([key, value]) => { const i = Number(key); if (i < roundIndex) roundPieces[i] = value; else if (i > roundIndex) roundPieces[i - 1] = value; });
+      return { ...p, scores, roundPieces };
+    });
+    const nextMax = settings.maxRounds - 1;
+    onUpdatePlayers(updatedPlayers);
+    onUpdateSettings({ ...settings, maxRounds: nextMax, currentRound: Math.max(1, Math.min(settings.currentRound > roundIndex + 1 ? settings.currentRound - 1 : settings.currentRound, nextMax)) });
+    setRoundActionIndex(null);
+  };
+
+  const handleMoveRound = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) { setRoundActionIndex(null); return; }
+    const moveItem = <T,>(items: T[], from: number, to: number) => { const next = [...items]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next; };
+    onUpdatePlayers(players.map((p) => {
+      const scores = moveItem(p.scores, fromIndex, toIndex);
+      const pieces = Array.from({ length: settings.maxRounds }, (_, i) => p.roundPieces?.[i] || []);
+      const roundPieces: Record<number, DominoTile[]> = {};
+      moveItem(pieces, fromIndex, toIndex).forEach((value, index) => { if (value.length) roundPieces[index] = value; });
+      return { ...p, scores, roundPieces };
+    }));
+    const ci = settings.currentRound - 1;
+    const next = ci === fromIndex ? toIndex : fromIndex < ci && toIndex >= ci ? ci - 1 : fromIndex > ci && toIndex <= ci ? ci + 1 : ci;
+    onUpdateSettings({ ...settings, currentRound: next + 1 });
+    setRoundActionIndex(null);
   };
 
   const handleRemovePlayer = (id: string) => {
@@ -215,10 +254,7 @@ export const RankingTab: React.FC<RankingTabProps> = ({
               🏆
             </div>
             <div>
-              <h2 className="text-base font-black leading-tight">Ranking em Tempo Real</h2>
-              <p className="text-xs text-amber-950/80 font-semibold">
-                Dominó Mexicano • Menos pontos vence!
-              </p>
+              <h2 className="text-base font-black leading-tight">Ranking</h2>
             </div>
           </div>
 
@@ -267,10 +303,6 @@ export const RankingTab: React.FC<RankingTabProps> = ({
       {/* Config Drawer / Settings (2-10 players, 1-10 rounds) */}
       {showConfig && (
         <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-            Ajustes da Mesa (2 a 10 Jogadores • 1 a 10 Partidas)
-          </h3>
-
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Quantidade de Rodadas:</p>
@@ -338,7 +370,7 @@ export const RankingTab: React.FC<RankingTabProps> = ({
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-medium border border-zinc-200 dark:border-zinc-700"
                 >
                   <span>{p.avatar}</span>
-                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{p.name}</span>
+                  <span onDoubleClick={() => setEditingPlayer({ id: p.id, name: p.name, avatar: p.avatar })} title="Toque duas vezes para editar nome e emoji" className="font-bold text-zinc-800 dark:text-zinc-200 cursor-pointer">{p.name}</span>
                   {players.length > 2 && (
                     <button
                       type="button"
@@ -422,7 +454,7 @@ export const RankingTab: React.FC<RankingTabProps> = ({
         <div className="flex items-center gap-2">
           <Edit2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-            Editar Peças ou Pontos da Rodada {settings.currentRound}:
+            Editar Rodada {settings.currentRound}:
           </span>
         </div>
         <div className="flex items-center gap-1 overflow-x-auto">
@@ -443,17 +475,6 @@ export const RankingTab: React.FC<RankingTabProps> = ({
 
       {/* Full Leaderboard Table & Scores Matrix */}
       <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xs overflow-hidden">
-        <div className="p-3.5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-          <div>
-            <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              Tabela de Pontos e Peças por Rodada
-            </h3>
-            <p className="text-[10px] text-zinc-400">
-              Toque em qualquer célula para editar o valor direto ou abrir o detalhamento das peças
-            </p>
-          </div>
-        </div>
-
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -463,7 +484,9 @@ export const RankingTab: React.FC<RankingTabProps> = ({
                 {Array.from({ length: settings.maxRounds }).map((_, i) => (
                   <th
                     key={i}
-                    className={`py-2.5 px-2 text-center font-bold whitespace-nowrap ${
+                    onDoubleClick={() => { setRoundActionIndex(i); setRoundMoveTarget(i); }}
+                    title="Toque duas vezes para excluir ou mover esta rodada"
+                    className={`py-2.5 px-2 text-center font-bold whitespace-nowrap cursor-pointer select-none ${
                       settings.currentRound === i + 1
                         ? 'bg-amber-100/60 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300'
                         : ''
@@ -506,7 +529,7 @@ export const RankingTab: React.FC<RankingTabProps> = ({
                   <td className="py-3 px-3 font-semibold text-zinc-900 dark:text-zinc-100">
                     <div className="flex items-center gap-1.5">
                       <span>{player.avatar}</span>
-                      <span className="truncate max-w-[90px]">{player.name}</span>
+                      <span onDoubleClick={() => setEditingPlayer({ id: player.id, name: player.name, avatar: player.avatar })} title="Toque duas vezes para editar nome e emoji" className="truncate max-w-[90px] cursor-pointer">{player.name}</span>
                     </div>
                   </td>
 
@@ -664,6 +687,39 @@ export const RankingTab: React.FC<RankingTabProps> = ({
           >
             Comemorar 🎊
           </button>
+        </div>
+      )}
+
+      {editingPlayer && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 p-4 space-y-3 shadow-2xl">
+            <h3 className="font-black text-sm text-zinc-900 dark:text-white">Editar jogador</h3>
+            <label className="block text-xs font-bold text-zinc-500">Nome</label>
+            <input autoFocus value={editingPlayer.name} onChange={(e) => setEditingPlayer({ ...editingPlayer, name: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm" />
+            <label className="block text-xs font-bold text-zinc-500">Emoji</label>
+            <input value={editingPlayer.avatar} onChange={(e) => setEditingPlayer({ ...editingPlayer, avatar: e.target.value })} maxLength={8} className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xl" />
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setEditingPlayer(null)} className="px-3 py-2 rounded-xl text-xs font-bold bg-zinc-100 dark:bg-zinc-800">Cancelar</button>
+              <button onClick={handleSavePlayerIdentity} className="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white">Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {roundActionIndex !== null && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 p-4 space-y-3 shadow-2xl">
+            <h3 className="font-black text-sm text-zinc-900 dark:text-white">Opções da Rodada {roundActionIndex + 1}</h3>
+            <button onClick={() => handleDeleteRound(roundActionIndex)} disabled={settings.maxRounds <= 1} className="w-full px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-bold disabled:opacity-40">Excluir rodada e os pontos de todos os jogadores</button>
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-zinc-500">Mover rodada para a posição</label>
+              <select value={roundMoveTarget} onChange={(e) => setRoundMoveTarget(Number(e.target.value))} className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm">
+                {Array.from({ length: settings.maxRounds }, (_, i) => <option key={i} value={i}>R{i + 1}</option>)}
+              </select>
+              <button onClick={() => handleMoveRound(roundActionIndex, roundMoveTarget)} className="w-full px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">Mover sem substituir (inserir nesta posição)</button>
+            </div>
+            <button onClick={() => setRoundActionIndex(null)} className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-xs font-bold">Cancelar</button>
+          </div>
         </div>
       )}
 
