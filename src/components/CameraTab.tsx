@@ -454,8 +454,9 @@ export const CameraTab: React.FC<CameraTabProps> = ({
 
   // Add a piece without depending on a previously detected result.
   const handleAddManualPiece = () => {
-    const sideA = Math.min(manualA, manualB);
-    const sideB = Math.max(manualA, manualB);
+    // Keep the entered order; side A and side B are not interchangeable.
+    const sideA = manualA;
+    const sideB = manualB;
     const newPiece: DetectedPiece = {
       id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sideA,
@@ -484,8 +485,9 @@ export const CameraTab: React.FC<CameraTabProps> = ({
   // Save individual piece editing
   const handleSavePieceEdit = (pieceId: string) => {
     if (!visionResult) return;
-    const a = Math.min(editSideA, editSideB);
-    const b = Math.max(editSideA, editSideB);
+    // Preserve the exact A/B order selected by the user.
+    const a = editSideA;
+    const b = editSideB;
 
     const updated = visionResult.pieces.map((p) => {
       if (p.id === pieceId) {
