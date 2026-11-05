@@ -101,3 +101,12 @@ test('live camera performs throttled on-device CV and displays a provisional cou
   assert.ok(source.includes('aria-live="polite"'));
   assert.ok(source.includes('livePieces.map((piece) => `[${piece.sideA}|${piece.sideB}]`)'));
 });
+
+test('camera shutter prefers a full-quality sensor still and safely falls back to preview video', () => {
+  assert.match(source, /ImageCapture\?: new \(track: MediaStreamTrack\)/);
+  assert.match(source, /capture\.takePhoto\(\)/);
+  assert.match(source, /if \(track && ImageCaptureCtor\)/);
+  assert.match(source, /High-quality camera still unavailable; using preview frame/);
+  assert.match(source, /1600 \/ sourceWidth/);
+  assert.match(source, /ctx\.getImageData\(0, 0, canvas\.width, canvas\.height\)/);
+});
