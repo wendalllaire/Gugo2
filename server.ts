@@ -178,6 +178,8 @@ REGRAS:
             const [yMin, xMin, yMax, xMax] = box;
             const boxWidth = xMax - xMin;
             const boxHeight = yMax - yMin;
+            const pixelX = xMin * frameWidth / 1000;
+            const pixelY = yMin * frameHeight / 1000;
             const pixelWidth = boxWidth * frameWidth / 1000;
             const pixelHeight = boxHeight * frameHeight / 1000;
             const shortSide = Math.min(pixelWidth, pixelHeight);
@@ -185,14 +187,20 @@ REGRAS:
             const areaFraction = (boxWidth * boxHeight) / 1000000;
             const aspect = longSide / Math.max(1, shortSide);
             const minFrameSide = Math.min(frameWidth, frameHeight);
+            const maxFrameSide = Math.max(frameWidth, frameHeight);
+            const frameMargin = Math.max(2, minFrameSide * 0.006);
+            const staysInsideFrame =
+              pixelX >= frameMargin && pixelY >= frameMargin &&
+              pixelX + pixelWidth <= frameWidth - frameMargin &&
+              pixelY + pixelHeight <= frameHeight - frameMargin;
             const confidence = Number(p.confidence ?? 0.8);
-            // Filter model hallucinations by normalized scale, aspect and confidence.
-            if (xMax <= xMin || yMax <= yMin ||
-                shortSide < Math.max(8, minFrameSide * 0.018) ||
-                longSide < Math.max(18, minFrameSide * 0.035) ||
-                longSide > Math.max(frameWidth, frameHeight) * 0.9 ||
-                areaFraction < 0.0012 || areaFraction > 0.14 ||
-                aspect < 1.25 || aspect > 2.8 || confidence < 0.55) return [];
+            // Filter tiny reflections, edge-clipped regions and oversized objects.
+            if (xMax <= xMin || yMax <= yMin || !staysInsideFrame ||
+                shortSide < Math.max(16, minFrameSide * 0.032) ||
+                longSide < Math.max(32, minFrameSide * 0.06) ||
+                longSide > maxFrameSide * 0.55 ||
+                areaFraction < 0.002 || areaFraction > 0.10 ||
+                aspect < 1.35 || aspect > 2.75 || confidence < 0.55) return [];
 
             return [{
               id: `gemini-tile-${Date.now()}-${idx}`,
