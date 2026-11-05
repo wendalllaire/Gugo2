@@ -43,6 +43,15 @@ jobs:
       - name: Test domino vision regression suite
         run: npm run test:domino-vision
 
+      - name: Upload labelled vision samples for QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: domino-vision-golden-samples
+          path: public/samples/*.jpg
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build web application
         run: npm run build
 
