@@ -40,6 +40,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Test domino vision regression suite
+        run: npm run test:domino-vision
+
       - name: Build web application
         run: npm run build
 
