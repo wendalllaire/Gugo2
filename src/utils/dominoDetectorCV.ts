@@ -749,19 +749,19 @@ function findPlausiblePipGrouping(
   width: number,
   height: number
 ): PipGroupCandidate | null {
-  if (pips.length < 10) return null;
+  if (pips.length < 8) return null;
   const frameShort = Math.min(width, height);
   let best: PipGroupCandidate | null = null;
 
   for (const axis of [0, 1] as const) {
-    const maxGroups = Math.min(10, Math.floor(pips.length / 5));
+    const maxGroups = Math.min(10, Math.floor(pips.length / 4));
     for (let count = 2; count <= maxGroups; count++) {
       const groups = clusterPipsOnAxis(pips, axis, count);
       if (groups.length !== count) continue;
       let valid = true;
       let penalty = 0;
       for (const group of groups) {
-        if (group.length < 5 || group.length > 24) {
+        if (group.length < 4 || group.length > 24) {
           valid = false;
           break;
         }
@@ -838,7 +838,7 @@ export function detectPipsByRadialVoting(
     }
   }
 
-  let thresholdCount = Math.ceil(edgeCount * 0.88);
+  let thresholdCount = Math.ceil(edgeCount * 0.82);
   let accumulated = 0;
   let edgeThreshold = 0;
   for (let i = 0; i < histogram.length; i++) {
@@ -884,7 +884,7 @@ export function detectPipsByRadialVoting(
   }
   if (maximumVotes < 8) return [];
   const minVotes = shortSide < 400 ? 8 : 30;
-  const voteThreshold = Math.max(minVotes, maximumVotes * 0.15);
+  const voteThreshold = Math.max(minVotes, maximumVotes * 0.18);
   const candidates: Array<{ x: number; y: number; votes: number }> = [];
 
   for (let y = 2; y < height - 2; y++) {
@@ -996,7 +996,7 @@ function tilesFromRadialPips(
     const pipsB = orientation === 'vertical'
       ? group.filter((p) => p.y > divider)
       : group.filter((p) => p.x > divider);
-    if (pipsA.length > 12 || pipsB.length > 12 || pipsA.length + pipsB.length < 5) return;
+    if (pipsA.length > 12 || pipsB.length > 12 || pipsA.length + pipsB.length < 4) return;
 
     const { halfA, halfB } = splitTileHalves(bbox, orientation);
     const sideA = pipsA.length;
