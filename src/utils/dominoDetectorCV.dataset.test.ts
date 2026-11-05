@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import jpeg from 'jpeg-js';
-import { detectDominoesOffline } from './dominoDetectorCV.ts';
+import { detectDominoesOffline, detectPipsByRadialVoting, detectDominoesByRadialVoting, rgbToGrayscale } from './dominoDetectorCV.ts';
 
 const sampleDirectory = path.resolve('public/samples');
 const referenceImage = 'IMG_20261102_231406.jpg';
@@ -114,10 +114,13 @@ function assertMatchesGoldStandard(
 ) {
   const result = detectDominoesOffline(rgba, width, height);
   const actual = result.pieces.map((piece) => normalizePair(piece.sideA, piece.sideB)).sort();
+  const gray = rgbToGrayscale(rgba, width, height);
+  const radialPips = detectPipsByRadialVoting(gray, width, height);
+  const radialTiles = detectDominoesByRadialVoting(rgba, width, height);
   assert.deepEqual(
     actual,
     expected,
-    `${name} [${transform}] expected ${expected.join(', ')}; got ${actual.join(', ')}; oriented=${JSON.stringify(result.pieces.map(p => [p.sideA,p.sideB]))}; total=${result.totalPoints}`
+    `${name} [${transform}] expected ${expected.join(', ')}; got ${actual.join(', ')}; oriented=${JSON.stringify(result.pieces.map(p => [p.sideA,p.sideB]))}; total=${result.totalPoints}; radialPips=${radialPips.length}; radialTiles=${JSON.stringify(radialTiles.map(t => [t.sideA,t.sideB]))}`
   );
 }
 
