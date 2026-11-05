@@ -890,13 +890,75 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         />
       </div>
 
+      {/* Manual Add Piece Panel */}
+      {showManualAdd && (
+        <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-2xl border border-emerald-500/40 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+              Adicionar Peça de Dominó Manualmente:
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowManualAdd(false)}
+              className="text-xs text-zinc-400 hover:text-zinc-600"
+            >
+              Cancelar
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 flex items-center gap-1.5">
+              <label htmlFor="cam-manual-side-a" className="text-xs text-zinc-500">Lado A:</label>
+              <select
+                id="cam-manual-side-a"
+                aria-label="Lado A do dominó"
+                value={manualA}
+                onChange={(e) => setManualA(Number(e.target.value))}
+                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
+              >
+                {Array.from({ length: 13 }).map((_, i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1 flex items-center gap-1.5">
+              <label htmlFor="cam-manual-side-b" className="text-xs text-zinc-500">Lado B:</label>
+              <select
+                id="cam-manual-side-b"
+                aria-label="Lado B do dominó"
+                value={manualB}
+                onChange={(e) => setManualB(Number(e.target.value))}
+                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
+              >
+                {Array.from({ length: 13 }).map((_, i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddManualPiece}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-95 transition-all"
+            >
+              Inserir [{Math.min(manualA, manualB)}|{Math.max(manualA, manualB)}]
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Detection Results & Scores Breakdown with Individual Editing */}
       {visionResult && (
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm space-y-4">
           {/* Total score only; recognition metadata and redundant piece-count labels are hidden. */}
           <div className="flex justify-end border-b border-zinc-100 dark:border-zinc-800 pb-3">
             <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
-              {visionResult.totalPoints} pts
+              {visionResult.totalPoints} pts <span className="ml-1 text-sm font-bold text-white/90">· {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'peça' : 'peças'}</span>
             </div>
           </div>
 
@@ -909,14 +971,14 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           {/* List of Detected Pieces with individual scores and INLINE EDITING */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-              <span>Peças Identificadas (toque duas vezes na peça da imagem para abrir o editor):</span>
+              <span>Toque duas vezes na peça para editar</span>
               <button
                 type="button"
                 onClick={() => setShowManualAdd(true)}
                 className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 hover:underline"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Adicionar mais uma</span>
+                <span>Adicionar</span>
               </button>
             </div>
 
@@ -1342,67 +1404,6 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         </div>
       )}
 
-      {/* Manual Add Piece Panel */}
-      {showManualAdd && (
-        <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-2xl border border-emerald-500/40 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              Adicionar Peça de Dominó Manualmente:
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowManualAdd(false)}
-              className="text-xs text-zinc-400 hover:text-zinc-600"
-            >
-              Cancelar
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 flex items-center gap-1.5">
-              <label htmlFor="cam-manual-side-a" className="text-xs text-zinc-500">Lado A:</label>
-              <select
-                id="cam-manual-side-a"
-                aria-label="Lado A do dominó"
-                value={manualA}
-                onChange={(e) => setManualA(Number(e.target.value))}
-                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
-              >
-                {Array.from({ length: 13 }).map((_, i) => (
-                  <option key={i} value={i}>
-                    {i}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex-1 flex items-center gap-1.5">
-              <label htmlFor="cam-manual-side-b" className="text-xs text-zinc-500">Lado B:</label>
-              <select
-                id="cam-manual-side-b"
-                aria-label="Lado B do dominó"
-                value={manualB}
-                onChange={(e) => setManualB(Number(e.target.value))}
-                className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg p-1.5 text-xs font-bold"
-              >
-                {Array.from({ length: 13 }).map((_, i) => (
-                  <option key={i} value={i}>
-                    {i}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleAddManualPiece}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-95 transition-all"
-            >
-              Inserir [{Math.min(manualA, manualB)}|{Math.max(manualA, manualB)}]
-            </button>
-          </div>
-        </div>
-      )}
       {offlineProcessingNotice && (
         <div
           role="status"
