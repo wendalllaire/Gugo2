@@ -535,7 +535,9 @@ export function clusterPipsIntoDominoes(
     }
 
     for (const sub of subClusters) {
-      if (sub.length === 0) continue;
+      // An isolated speck is insufficient evidence. Phase A still detects
+      // genuine [0|1] and blank tiles from their physical body.
+      if (sub.length < 2) continue;
 
       const sMinX = Math.min(...sub.map((p) => p.x));
       const sMaxX = Math.max(...sub.map((p) => p.x));
@@ -552,6 +554,7 @@ export function clusterPipsIntoDominoes(
 
       const orientation: 'vertical' | 'horizontal' = bboxH >= bboxW ? 'vertical' : 'horizontal';
       const bbox = { x: bboxX, y: bboxY, width: bboxW, height: bboxH };
+      if (!isPlausibleDominoBox(bbox, imgWidth, imgHeight)) continue;
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
 
       // Separate pips into halfA and halfB
@@ -592,6 +595,33 @@ export function clusterPipsIntoDominoes(
   return tiles;
 }
 
+
+/** Scale and shape gate for a physical Double-12 domino, relative to the frame. */
+export function isPlausibleDominoBox(
+  bbox: { x: number; y: number; width: number; height: number },
+  frameWidth: number,
+  frameHeight: number
+): boolean {
+  if (frameWidth <= 0 || frameHeight <= 0 || bbox.width <= 0 || bbox.height <= 0) return false;
+  const areaFraction = (bbox.width * bbox.height) / (frameWidth * frameHeight);
+  const shortSide = Math.min(bbox.width, bbox.height);
+  const longSide = Math.max(bbox.width, bbox.height);
+  const aspect = longSide / shortSide;
+  const frameShortSide = Math.min(frameWidth, frameHeight);
+  const frameLongSide = Math.max(frameWidth, frameHeight);
+  return areaFraction >= 0.00045 && areaFraction <= 0.18 &&
+    shortSide >= Math.max(8, frameShortSide * 0.018) &&
+    longSide >= Math.max(18, frameShortSide * 0.035) &&
+    longSide <= frameLongSide * 0.9 &&
+    aspect >= 1.25 && aspect <= 2.8;
+}
+
+/** Yellow hue/chroma mask; works when a yellow tile is not bright enough in grayscale. */
+export function isYellowTilePixel(r: number, g: number, b: number): boolean {
+  return r >= 75 && g >= 65 && b <= Math.min(r, g) * 0.84 &&
+    r - b >= 25 && g - b >= 18 && g >= r * 0.45 && r >= g * 0.82;
+}
+
 /**
  * Main Offline Detection Pipeline:
  * Analyzes pixel data from HTML5 Canvas / Camera frame without any external server or API.
@@ -623,19 +653,26 @@ export function detectDominoesOffline(
   const tileThreshold = Math.min(235, threshold + 18);
   const binTiles = binarize(gray, tileThreshold, true);
 
-  // Find candidate tile blobs
-  const minTileArea = (width * height) * 0.005; // 0.5% of frame
-  const maxTileArea = (width * height) * 0.75;
+  // Explicit chroma path for yellow pieces, merged with the ivory/white mask.
+  for (let i = 0; i < width * height; i++) {
+    const offset = i * 4;
+    if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
+      binTiles[i] = 1;
+    }
+  }
+
+  // Reject tiny specks and oversized regions at the connected-component stage.
+  const minTileArea = (width * height) * 0.00045;
+  const maxTileArea = (width * height) * 0.18;
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
-  // Filter blobs with domino-like aspect ratios (~1:2 or 2:1)
+  // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
   const candidateBlobs = tileBlobs.filter((b) => {
     const bw = b.maxX - b.minX + 1;
     const bh = b.maxY - b.minY + 1;
-    const aspect = bw / Math.max(1, bh);
-    const isVertical = aspect >= 0.35 && aspect <= 0.85;
-    const isHorizontal = aspect >= 1.20 && aspect <= 2.85;
-    return isVertical || isHorizontal;
+    const bbox = { x: b.minX, y: b.minY, width: bw, height: bh };
+    const rectangularity = b.area / Math.max(1, bw * bh);
+    return isPlausibleDominoBox(bbox, width, height) && rectangularity >= 0.42;
   });
 
   const detectedTiles: DetectedTileCV[] = [];
