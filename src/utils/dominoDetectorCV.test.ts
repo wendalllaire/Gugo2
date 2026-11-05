@@ -171,3 +171,35 @@ test('detectDominoesOffline detects multiple dominoes on synthetic image', () =>
   assert.equal(result.pieces.length, result.tiles.length);
   assert.ok(result.totalPoints > 0);
 });
+
+
+test('yellow domino body is detected by chroma even when grayscale threshold is insufficient', () => {
+  const w = 200;
+  const h = 160;
+  const rgba = new Uint8Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    rgba[i * 4] = 20; rgba[i * 4 + 1] = 75; rgba[i * 4 + 2] = 35; rgba[i * 4 + 3] = 255;
+  }
+  for (let y = 35; y < 125; y++) for (let x = 75; x < 125; x++) {
+    const i = (y * w + x) * 4;
+    rgba[i] = 245; rgba[i + 1] = 205; rgba[i + 2] = 45;
+  }
+  const drawPip = (cx: number, cy: number) => {
+    for (let y = cy - 3; y <= cy + 3; y++) for (let x = cx - 3; x <= cx + 3; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= 9) {
+        const i = (y * w + x) * 4;
+        rgba[i] = rgba[i + 1] = rgba[i + 2] = 15;
+      }
+    }
+  };
+  drawPip(100, 55); drawPip(100, 105);
+  const result = detectDominoesOffline(rgba, w, h);
+  assert.ok(result.tiles.length >= 1, 'Yellow domino should be detected');
+});
+
+test('domino geometry filter rejects tiny and oversized objects but accepts a tile', async () => {
+  const { isPlausibleDominoBox } = await import('./dominoDetectorCV.ts');
+  assert.equal(isPlausibleDominoBox({ x: 10, y: 10, width: 5, height: 10 }, 640, 480), false);
+  assert.equal(isPlausibleDominoBox({ x: 0, y: 0, width: 600, height: 400 }, 640, 480), false);
+  assert.equal(isPlausibleDominoBox({ x: 100, y: 100, width: 40, height: 80 }, 640, 480), true);
+});
