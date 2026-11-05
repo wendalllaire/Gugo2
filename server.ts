@@ -99,16 +99,14 @@ app.post('/api/analyze-dominoes', async (req: Request, res: Response): Promise<v
 Analise a imagem da mesa e identifique e CATALOGUE TODAS AS PEÇAS DE DOMINÓ PRESENTES NA FOTO, UMA A UMA.
 
 REGRAS:
-1. Um conjunto de dominó mexicano Double-12 possui valores de 0 a 12 pips em cada metade ([0|0] até [12|12]).
-2. Se a foto contiver múltiplas peças, retorne cada uma como um item individual no array 'pieces'.
-3. Para cada peça detectada:
-   - sideA: menor número de pips (0 a 12)
-   - sideB: maior número de pips (0 a 12, com sideA <= sideB)
-   - points: a soma exata (sideA + sideB)
-   - label: "[sideA|sideB]"
-   - confidence: precisão de 0.8 a 1.0
-   - box2d: [ymin, xmin, ymax, xmax] normalizado 0 a 1000
-4. 'totalPoints': soma exata de todos os pontos.`;
+1. Um conjunto Double-12 possui valores de 0 a 12 pips em cada metade ([0|0] até [12|12]).
+2. As peças podem ser brancas/marfim OU amarelas; não exclua uma peça por ser amarela, por reflexos ou sombras.
+3. Catalogue apenas objetos com contorno físico de dominó: retângulo alongado, proporção aproximada 2:1 e duas metades.
+4. NÃO catalogue mãos, dedos, caixas, cartas, pratos, manchas, reflexos, sombras, padrões da mesa ou objetos fora da escala de uma peça.
+5. Retorne cada peça individualmente. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]"; confidence entre 0 e 1.
+6. box2d=[ymin,xmin,ymax,xmax] normalizado 0 a 1000 e deve envolver apenas a peça.
+7. Se não houver uma peça fisicamente plausível, devolva pieces vazio. Nunca invente peças para completar a imagem.
+8. 'totalPoints' é a soma exata de todos os pontos.`;
 
         // 4-second timeout to ensure instant fallback if network egress is slow
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -166,18 +164,38 @@ REGRAS:
         const rawText = response.text;
         if (rawText) {
           const parsed = JSON.parse(rawText);
-          const pieces: DetectedPiece[] = (parsed.pieces || []).map((p: any, idx: number) => {
-            const min = Math.min(Number(p.sideA) || 0, Number(p.sideB) || 0);
-            const max = Math.max(Number(p.sideA) || 0, Number(p.sideB) || 0);
-            return {
+          const pieces: DetectedPiece[] = (parsed.pieces || []).flatMap((p: any, idx: number) => {
+            const rawA = Number(p.sideA);
+            const rawB = Number(p.sideB);
+            const box = Array.isArray(p.box2d) && p.box2d.length === 4 ? p.box2d.map(Number) : null;
+            if (!Number.isInteger(rawA) || !Number.isInteger(rawB) ||
+                rawA < 0 || rawA > 12 || rawB < 0 || rawB > 12 ||
+                !box || box.some((v: number) => !Number.isFinite(v) || v < 0 || v > 1000)) return [];
+
+            const [yMin, xMin, yMax, xMax] = box;
+            const boxWidth = xMax - xMin;
+            const boxHeight = yMax - yMin;
+            const shortSide = Math.min(boxWidth, boxHeight);
+            const longSide = Math.max(boxWidth, boxHeight);
+            const areaFraction = (boxWidth * boxHeight) / 1000000;
+            const aspect = longSide / Math.max(1, shortSide);
+            const confidence = Number(p.confidence ?? 0.8);
+            // Filter model hallucinations by normalized scale, aspect and confidence.
+            if (xMax <= xMin || yMax <= yMin || shortSide < 18 || longSide > 900 ||
+                areaFraction < 0.00045 || areaFraction > 0.18 ||
+                aspect < 1.25 || aspect > 2.8 || confidence < 0.55) return [];
+
+            const min = Math.min(rawA, rawB);
+            const max = Math.max(rawA, rawB);
+            return [{
               id: `gemini-tile-${Date.now()}-${idx}`,
               sideA: min,
               sideB: max,
               points: min + max,
-              label: p.label || `[${min}|${max}]`,
-              confidence: p.confidence || 0.98,
-              box2d: Array.isArray(p.box2d) && p.box2d.length === 4 ? p.box2d : undefined,
-            };
+              label: `[${min}|${max}]`,
+              confidence: Math.min(1, confidence),
+              box2d: box,
+            }];
           });
 
           pieces.sort((a, b) => b.points - a.points);
