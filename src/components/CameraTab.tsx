@@ -778,9 +778,9 @@ export const CameraTab: React.FC<CameraTabProps> = ({
                 })}
                 <text
                   x={lastRawImageData.width / 2}
-                  y={lastRawImageData.height - Math.max(24, lastRawImageData.height * 0.035)}
+                  y={lastRawImageData.height * 0.68}
                   textAnchor="middle"
-                  fontSize={Math.max(28, Math.min(58, lastRawImageData.width * 0.045))}
+                  fontSize={Math.max(36, Math.min(72, lastRawImageData.width * 0.06))}
                   fontFamily="Georgia, serif"
                   fill="#f5e8c2"
                   stroke="rgba(0, 0, 0, 0.72)"
@@ -955,10 +955,13 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       {/* Detection Results & Scores Breakdown with Individual Editing */}
       {visionResult && (
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm space-y-4">
-          {/* Total score only; recognition metadata and redundant piece-count labels are hidden. */}
-          <div className="flex justify-end border-b border-zinc-100 dark:border-zinc-800 pb-3">
+          {/* Piece count stays outside the unchanged total-score indicator. */}
+          <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <span className="text-sm font-bold text-zinc-600 dark:text-zinc-300">
+              {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'peça' : 'peças'}
+            </span>
             <div className="px-3.5 py-1 rounded-xl bg-linear-to-r from-red-500 to-rose-600 text-white font-black text-xl shadow-sm">
-              {visionResult.totalPoints} pts <span className="ml-1 text-sm font-bold text-white/90">· {visionResult.pieces.length} {visionResult.pieces.length === 1 ? 'peça' : 'peças'}</span>
+              {visionResult.totalPoints} pts
             </div>
           </div>
 
