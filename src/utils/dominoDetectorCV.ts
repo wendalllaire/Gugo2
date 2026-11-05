@@ -647,10 +647,10 @@ export function detectDominoesOffline(
   }
 
   // 1. Detect Pips: Pips are dark circular marks
-  // Pip colors vary (yellow, red, grey and purple). A higher threshold captures their
-  // shaded circular bodies inside the already-cropped tile halves; the tile ROI
-  // prevents the dark felt from becoming pip candidates.
-  const pipThreshold = Math.min(190, Math.max(110, threshold + 35));
+  // Pip colors vary (yellow, red, grey and purple). Raise the old Otsu cutoff
+  // slightly so shaded pip edges remain visible without merging tile shadows.
+  // The half-tile crop and circularity/size gates reject the felt and divider.
+  const pipThreshold = Math.min(135, Math.max(110, threshold - 3));
   const binPips = binarize(gray, pipThreshold, options.invertColors ?? false);
 
   // 2. Detect Domino Bodies: Light ivory surfaces
