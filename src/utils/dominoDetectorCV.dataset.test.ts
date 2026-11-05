@@ -9,7 +9,7 @@ const sampleDirectory = path.resolve('public/samples');
 const referenceImage = 'IMG_20261102_231406.jpg';
 const referenceExpected = ['1-11', '4-6', '7-11'];
 const sampleNames = fs.readdirSync(sampleDirectory)
-  .filter((name) => /\\d{1,2}-\\d{1,2}/.test(name) && /\\.jpe?g$/i.test(name))
+  .filter((name) => /\d{1,2}-\d{1,2}/.test(name) && /\.jpe?g$/i.test(name))
   .sort();
 
 function normalizePair(a: number, b: number): string {
@@ -17,7 +17,7 @@ function normalizePair(a: number, b: number): string {
 }
 
 function expectedPairsFromFilename(name: string): string[] {
-  const pairs = name.match(/\\d{1,2}-\\d{1,2}/g) || [];
+  const pairs = name.match(/\d{1,2}-\d{1,2}/g) || [];
   return pairs.map((pair) => {
     const [a, b] = pair.split('-').map(Number);
     return normalizePair(a, b);
