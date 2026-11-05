@@ -197,8 +197,8 @@ REGRAS:
               id: `gemini-tile-${Date.now()}-${idx}`,
               sideA: rawA,
               sideB: rawB,
-              points: min + max,
-              label: `[${min}|${max}]`,
+              points: rawA + rawB,
+              label: `[${rawA}|${rawB}]`,
               confidence: Math.min(1, confidence),
               box2d: box,
             }];
