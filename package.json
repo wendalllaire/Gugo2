@@ -11,7 +11,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:camera-regression": "node --test tests/camera-tab-regression.test.mjs",
-    "test:domino-vision": "tsx --test src/utils/dominoDetectorCV.test.ts src/utils/dominoDetectorCV.dataset.test.ts",
+    "test:domino-vision": "tsx --test src/utils/dominoDetectorCV.test.ts src/utils/dominoDetectorCV.dataset.test.ts tests/camera-tab-regression.test.mjs",
     "android:sync": "npm run build && cap sync android"
   },
   "dependencies": {
