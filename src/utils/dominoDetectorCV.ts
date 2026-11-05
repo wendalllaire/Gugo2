@@ -691,48 +691,57 @@ interface PipGroupCandidate {
 }
 
 /** Deterministic 1-D k-means used to separate spatially distinct domino bodies. */
+/** Globally optimal 1-D clustering via dynamic programming on sorted coordinates. */
 function clusterPipsOnAxis(pips: DetectedPip[], axis: 0 | 1, k: number): DetectedPip[][] {
   const sorted = [...pips].sort((a, b) => (axis === 0 ? a.x - b.x : a.y - b.y));
-  let centers = Array.from({ length: k }, (_, i) => {
-    const index = Math.min(sorted.length - 1, Math.floor(((i + 0.5) * sorted.length) / k));
-    return axis === 0 ? sorted[index].x : sorted[index].y;
-  });
-  let labels = new Int16Array(sorted.length);
+  const n = sorted.length;
+  if (k < 1 || k > n) return [];
 
-  for (let iteration = 0; iteration < 40; iteration++) {
-    let changed = false;
-    const sums = new Float64Array(k);
-    const counts = new Int32Array(k);
-    for (let i = 0; i < sorted.length; i++) {
-      const value = axis === 0 ? sorted[i].x : sorted[i].y;
-      let best = 0;
-      let bestDistance = Math.abs(value - centers[0]);
-      for (let c = 1; c < k; c++) {
-        const distance = Math.abs(value - centers[c]);
-        if (distance < bestDistance) {
-          best = c;
-          bestDistance = distance;
-        }
-      }
-      if (labels[i] !== best) changed = true;
-      labels[i] = best;
-      sums[best] += value;
-      counts[best]++;
-    }
-    for (let c = 0; c < k; c++) {
-      if (counts[c] === 0) return [];
-      centers[c] = sums[c] / counts[c];
-    }
-    if (!changed) break;
+  const prefix = new Float64Array(n + 1);
+  const prefixSquares = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    const value = axis === 0 ? sorted[i].x : sorted[i].y;
+    prefix[i + 1] = prefix[i] + value;
+    prefixSquares[i + 1] = prefixSquares[i] + value * value;
   }
 
-  const groups: DetectedPip[][] = Array.from({ length: k }, () => []);
-  for (let i = 0; i < sorted.length; i++) groups[labels[i]].push(sorted[i]);
-  return groups.sort((a, b) => {
-    const av = a.reduce((sum, p) => sum + (axis === 0 ? p.x : p.y), 0) / a.length;
-    const bv = b.reduce((sum, p) => sum + (axis === 0 ? p.x : p.y), 0) / b.length;
-    return av - bv;
-  });
+  const columns = n + 1;
+  const dp = new Float64Array((k + 1) * columns);
+  const back = new Int16Array((k + 1) * columns);
+  dp.fill(Number.POSITIVE_INFINITY);
+  back.fill(-1);
+  dp[0] = 0;
+
+  const intervalCost = (from: number, to: number): number => {
+    const count = to - from;
+    if (count <= 0) return Number.POSITIVE_INFINITY;
+    const sum = prefix[to] - prefix[from];
+    const sumSquares = prefixSquares[to] - prefixSquares[from];
+    return Math.max(0, sumSquares - (sum * sum) / count);
+  };
+
+  for (let groups = 1; groups <= k; groups++) {
+    for (let end = groups; end <= n; end++) {
+      const row = groups * columns + end;
+      for (let split = groups - 1; split < end; split++) {
+        const candidate = dp[(groups - 1) * columns + split] + intervalCost(split, end);
+        if (candidate < dp[row]) {
+          dp[row] = candidate;
+          back[row] = split;
+        }
+      }
+    }
+  }
+
+  const groups: DetectedPip[][] = [];
+  let end = n;
+  for (let groupCount = k; groupCount >= 1; groupCount--) {
+    const split = back[groupCount * columns + end];
+    if (split < 0) return [];
+    groups.push(sorted.slice(split, end));
+    end = split;
+  }
+  return groups.reverse();
 }
 
 function findPlausiblePipGrouping(
