@@ -664,10 +664,19 @@ export function isPlausibleDominoBox(
   const aspect = longSide / shortSide;
   const frameShortSide = Math.min(frameWidth, frameHeight);
   const frameLongSide = Math.max(frameWidth, frameHeight);
-  return areaFraction >= 0.0012 && areaFraction <= 0.14 &&
-    shortSide >= Math.max(10, frameShortSide * 0.022) &&
-    longSide >= Math.max(20, frameShortSide * 0.045) &&
-    longSide <= frameLongSide * 0.82 &&
+  // A real domino occupies a substantial, elongated footprint. Reject
+  // tiny reflected objects and any candidate clipped by the frame edge.
+  const frameMargin = Math.max(2, frameShortSide * 0.006);
+  const staysInsideFrame =
+    bbox.x >= frameMargin &&
+    bbox.y >= frameMargin &&
+    bbox.x + bbox.width <= frameWidth - frameMargin &&
+    bbox.y + bbox.height <= frameHeight - frameMargin;
+  return staysInsideFrame &&
+    areaFraction >= 0.002 && areaFraction <= 0.10 &&
+    shortSide >= Math.max(16, frameShortSide * 0.032) &&
+    longSide >= Math.max(32, frameShortSide * 0.06) &&
+    longSide <= frameLongSide * 0.55 &&
     aspect >= 1.35 && aspect <= 2.75;
 }
 
