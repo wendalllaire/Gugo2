@@ -807,18 +807,51 @@ function findPlausiblePipGrouping(
   };
 
   const clusters = recurse(pips, 0);
-  if (clusters.length < 2 || clusters.length > 12) return null;
-  let score = 0;
-  for (const group of clusters) {
-    if (group.length < 4 || group.length > 24) return null;
-    const xs = group.map((p) => p.x);
-    const ys = group.map((p) => p.y);
-    const spanX = Math.max(...xs) - Math.min(...xs);
-    const spanY = Math.max(...ys) - Math.min(...ys);
-    const aspect = Math.max(spanX, spanY) / Math.max(1, Math.min(spanX, spanY));
-    score += 10 - Math.abs(Math.log(aspect / 2.0));
+  if (clusters.length >= 2 && clusters.length <= 12 &&
+      clusters.every((group) => group.length >= 4 && group.length <= 24)) {
+    let score = 0;
+    for (const group of clusters) {
+      const xs = group.map((p) => p.x);
+      const ys = group.map((p) => p.y);
+      const spanX = Math.max(...xs) - Math.min(...xs);
+      const spanY = Math.max(...ys) - Math.min(...ys);
+      const aspect = Math.max(spanX, spanY) / Math.max(1, Math.min(spanX, spanY));
+      score += 10 - Math.abs(Math.log(aspect / 2.0));
+    }
+    return { axis: 0, count: clusters.length, clusters, score };
   }
-  return { axis: 0, count: clusters.length, clusters, score };
+
+  // Exact 1-D partition fallback for a single-row or single-column tray.
+  let best: PipGroupCandidate | null = null;
+  const maxGroups = Math.min(12, Math.floor(pips.length / 4));
+  for (const axis of [0, 1] as const) {
+    for (let count = 2; count <= maxGroups; count++) {
+      const groups = clusterPipsOnAxis(pips, axis, count);
+      if (groups.length !== count) continue;
+      let valid = true;
+      let score = count * 10;
+      for (const group of groups) {
+        if (group.length < 4 || group.length > 24) { valid = false; break; }
+        const xs = group.map((p) => p.x);
+        const ys = group.map((p) => p.y);
+        const spanX = Math.max(...xs) - Math.min(...xs);
+        const spanY = Math.max(...ys) - Math.min(...ys);
+        const shortSpan = Math.min(spanX, spanY);
+        const longSpan = Math.max(spanX, spanY);
+        const aspect = longSpan / Math.max(1, shortSpan);
+        if (shortSpan < Math.max(12, frameShort * 0.025) ||
+            longSpan < frameShort * 0.05 || aspect < 1.05 || aspect > 3.8) {
+          valid = false;
+          break;
+        }
+        score -= Math.abs(Math.log(aspect / 2.0));
+      }
+      if (valid && (!best || score > best.score)) {
+        best = { axis, count, clusters: groups, score };
+      }
+    }
+  }
+  return best;
 }
 
 /**
@@ -880,8 +913,8 @@ export function detectPipsByRadialVoting(
   }
 
   const shortSide = Math.min(width, height);
-  const minRadius = Math.max(3, Math.round(shortSide * 0.0125));
-  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.025));
+  const minRadius = Math.max(3, Math.round(shortSide * 0.008));
+  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.032));
   const accumulator = new Uint16Array(gray.length);
 
   for (let y = 2; y < height - 2; y++) {
