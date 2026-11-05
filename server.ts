@@ -110,9 +110,10 @@ REGRAS:
 7. Se não houver uma peça fisicamente plausível, devolva pieces vazio. Nunca invente peças para completar a imagem.
 8. 'totalPoints' é a soma exata de todos os pontos.`;
 
-        // 4-second timeout to ensure instant fallback if network egress is slow
+        // Camera still photos can be larger and take longer to upload/infer.
+        // Allow a little more time before falling back to the on-device detector.
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 4000)
+          setTimeout(() => reject(new Error('timeout')), 8000)
         );
 
         const geminiCall = ai.models.generateContent({
