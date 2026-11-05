@@ -682,6 +682,345 @@ export function isYellowTilePixel(r: number, g: number, b: number): boolean {
  * Analyzes pixel data from HTML5 Canvas / Camera frame without any external server or API.
  * Detects multiple dominoes and catalogs each piece individually.
  */
+
+interface PipGroupCandidate {
+  axis: 0 | 1;
+  count: number;
+  clusters: DetectedPip[][];
+  score: number;
+}
+
+/** Deterministic 1-D k-means used to separate spatially distinct domino bodies. */
+function clusterPipsOnAxis(pips: DetectedPip[], axis: 0 | 1, k: number): DetectedPip[][] {
+  const sorted = [...pips].sort((a, b) => (axis === 0 ? a.x - b.x : a.y - b.y));
+  let centers = Array.from({ length: k }, (_, i) => {
+    const index = Math.min(sorted.length - 1, Math.floor(((i + 0.5) * sorted.length) / k));
+    return axis === 0 ? sorted[index].x : sorted[index].y;
+  });
+  let labels = new Int16Array(sorted.length);
+
+  for (let iteration = 0; iteration < 40; iteration++) {
+    let changed = false;
+    const sums = new Float64Array(k);
+    const counts = new Int32Array(k);
+    for (let i = 0; i < sorted.length; i++) {
+      const value = axis === 0 ? sorted[i].x : sorted[i].y;
+      let best = 0;
+      let bestDistance = Math.abs(value - centers[0]);
+      for (let c = 1; c < k; c++) {
+        const distance = Math.abs(value - centers[c]);
+        if (distance < bestDistance) {
+          best = c;
+          bestDistance = distance;
+        }
+      }
+      if (labels[i] !== best) changed = true;
+      labels[i] = best;
+      sums[best] += value;
+      counts[best]++;
+    }
+    for (let c = 0; c < k; c++) {
+      if (counts[c] === 0) return [];
+      centers[c] = sums[c] / counts[c];
+    }
+    if (!changed) break;
+  }
+
+  const groups: DetectedPip[][] = Array.from({ length: k }, () => []);
+  for (let i = 0; i < sorted.length; i++) groups[labels[i]].push(sorted[i]);
+  return groups.sort((a, b) => {
+    const av = a.reduce((sum, p) => sum + (axis === 0 ? p.x : p.y), 0) / a.length;
+    const bv = b.reduce((sum, p) => sum + (axis === 0 ? p.x : p.y), 0) / b.length;
+    return av - bv;
+  });
+}
+
+function findPlausiblePipGrouping(
+  pips: DetectedPip[],
+  width: number,
+  height: number
+): PipGroupCandidate | null {
+  if (pips.length < 10) return null;
+  const frameShort = Math.min(width, height);
+  let best: PipGroupCandidate | null = null;
+
+  for (const axis of [0, 1] as const) {
+    const maxGroups = Math.min(10, Math.floor(pips.length / 5));
+    for (let count = 2; count <= maxGroups; count++) {
+      const groups = clusterPipsOnAxis(pips, axis, count);
+      if (groups.length !== count) continue;
+      let valid = true;
+      let penalty = 0;
+      for (const group of groups) {
+        if (group.length < 5 || group.length > 24) {
+          valid = false;
+          break;
+        }
+        const xs = group.map((p) => p.x);
+        const ys = group.map((p) => p.y);
+        const spanX = Math.max(...xs) - Math.min(...xs);
+        const spanY = Math.max(...ys) - Math.min(...ys);
+        const shortSpan = Math.min(spanX, spanY);
+        const longSpan = Math.max(spanX, spanY);
+        const aspect = longSpan / Math.max(1, shortSpan);
+        if (
+          shortSpan < Math.max(12, frameShort * 0.035) ||
+          longSpan < frameShort * 0.08 ||
+          aspect < 1.15 ||
+          aspect > 3.8
+        ) {
+          valid = false;
+          break;
+        }
+        penalty += Math.abs(Math.log(aspect / 2.2));
+      }
+      if (!valid) continue;
+      const score = count * 10 - penalty;
+      if (!best || score > best.score) best = { axis, count, clusters: groups, score };
+    }
+  }
+  return best;
+}
+
+/**
+ * Gradient-based radial voting for shiny/low-contrast pips.
+ * It votes for circle centres from edge normals, rather than requiring a dark
+ * filled blob. This keeps yellow and grey pips visible under exposure changes.
+ */
+export function detectPipsByRadialVoting(
+  gray: Uint8Array,
+  width: number,
+  height: number
+): DetectedPip[] {
+  if (width < 24 || height < 24 || gray.length !== width * height) return [];
+
+  const smooth = new Float32Array(gray.length);
+  const gx = new Float32Array(gray.length);
+  const gy = new Float32Array(gray.length);
+  const magnitude = new Float32Array(gray.length);
+  const histogram = new Uint32Array(2048);
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const i = y * width + x;
+      smooth[i] = (
+        gray[i - width - 1] + 2 * gray[i - width] + gray[i - width + 1] +
+        2 * gray[i - 1] + 4 * gray[i] + 2 * gray[i + 1] +
+        gray[i + width - 1] + 2 * gray[i + width] + gray[i + width + 1]
+      ) / 16;
+    }
+  }
+
+  let edgeCount = 0;
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const i = y * width + x;
+      const p00 = smooth[i - width - 1], p01 = smooth[i - width], p02 = smooth[i - width + 1];
+      const p10 = smooth[i - 1], p12 = smooth[i + 1];
+      const p20 = smooth[i + width - 1], p21 = smooth[i + width], p22 = smooth[i + width + 1];
+      const sx = -p00 + p02 - 2 * p10 + 2 * p12 - p20 + p22;
+      const sy = -p00 - 2 * p01 - p02 + p20 + 2 * p21 + p22;
+      gx[i] = sx;
+      gy[i] = sy;
+      const mag = Math.hypot(sx, sy);
+      magnitude[i] = mag;
+      histogram[Math.min(2047, Math.round(mag))]++;
+      edgeCount++;
+    }
+  }
+
+  let thresholdCount = Math.ceil(edgeCount * 0.12);
+  let accumulated = 0;
+  let edgeThreshold = 0;
+  for (let i = 0; i < histogram.length; i++) {
+    accumulated += histogram[i];
+    if (accumulated >= thresholdCount) {
+      edgeThreshold = i;
+      break;
+    }
+  }
+
+  const shortSide = Math.min(width, height);
+  const minRadius = Math.max(3, Math.round(shortSide * 0.0125));
+  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.025));
+  const accumulator = new Uint16Array(gray.length);
+
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const i = y * width + x;
+      const mag = magnitude[i];
+      if (mag <= edgeThreshold || mag < 1) continue;
+      const ux = gx[i] / mag;
+      const uy = gy[i] / mag;
+      for (let radius = minRadius; radius <= maxRadius; radius++) {
+        const dx = ux * radius;
+        const dy = uy * radius;
+        const x1 = Math.round(x - dx), y1 = Math.round(y - dy);
+        const x2 = Math.round(x + dx), y2 = Math.round(y + dy);
+        if (x1 >= 0 && x1 < width && y1 >= 0 && y1 < height) {
+          const at = y1 * width + x1;
+          if (accumulator[at] < 65535) accumulator[at]++;
+        }
+        if (x2 >= 0 && x2 < width && y2 >= 0 && y2 < height) {
+          const at = y2 * width + x2;
+          if (accumulator[at] < 65535) accumulator[at]++;
+        }
+      }
+    }
+  }
+
+  let maximumVotes = 0;
+  for (let i = 0; i < accumulator.length; i++) {
+    if (accumulator[i] > maximumVotes) maximumVotes = accumulator[i];
+  }
+  if (maximumVotes < 8) return [];
+  const minVotes = shortSide < 400 ? 8 : 30;
+  const voteThreshold = Math.max(minVotes, maximumVotes * 0.15);
+  const candidates: Array<{ x: number; y: number; votes: number }> = [];
+
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const i = y * width + x;
+      const votes = accumulator[i];
+      if (votes < voteThreshold) continue;
+      let isMaximum = true;
+      for (let dy = -2; dy <= 2 && isMaximum; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if ((dx !== 0 || dy !== 0) && accumulator[(y + dy) * width + x + dx] > votes) {
+            isMaximum = false;
+            break;
+          }
+        }
+      }
+      if (isMaximum) candidates.push({ x, y, votes });
+    }
+  }
+
+  candidates.sort((a, b) => b.votes - a.votes);
+  const minDistance = Math.max(6, Math.round(shortSide * 0.029));
+  const minDistanceSquared = minDistance * minDistance;
+  const selected: DetectedPip[] = [];
+  const radius = (minRadius + maxRadius) / 2;
+  for (const candidate of candidates) {
+    if (selected.some((other) => {
+      const dx = candidate.x - other.x;
+      const dy = candidate.y - other.y;
+      return dx * dx + dy * dy < minDistanceSquared;
+    })) continue;
+    selected.push({
+      x: candidate.x,
+      y: candidate.y,
+      radius: Math.round(radius),
+      area: Math.PI * radius * radius,
+      circularity: 0.82,
+    });
+  }
+  return selected;
+}
+
+function tilesFromRadialPips(
+  pips: DetectedPip[],
+  gray: Uint8Array,
+  width: number,
+  height: number
+): DetectedTileCV[] {
+  const grouping = findPlausiblePipGrouping(pips, width, height);
+  if (!grouping) return [];
+  const frameShort = Math.min(width, height);
+  const medianRadius = [...pips].map((p) => p.radius).sort((a, b) => a - b)[Math.floor(pips.length / 2)] || 6;
+  const tiles: DetectedTileCV[] = [];
+
+  grouping.clusters.forEach((group, index) => {
+    const xs = group.map((p) => p.x);
+    const ys = group.map((p) => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const orientation: 'vertical' | 'horizontal' = spanY >= spanX ? 'vertical' : 'horizontal';
+    const pad = Math.max(10, Math.round(medianRadius * 1.5), Math.round(Math.min(spanX, spanY) * 0.12));
+    const bbox = {
+      x: Math.max(0, minX - pad),
+      y: Math.max(0, minY - pad),
+      width: Math.min(width - Math.max(0, minX - pad), spanX + 1 + pad * 2),
+      height: Math.min(height - Math.max(0, minY - pad), spanY + 1 + pad * 2),
+    };
+    if (!isPlausibleDominoBox(bbox, width, height)) return;
+
+    let divider = 0;
+    if (orientation === 'vertical') {
+      const scanStart = Math.max(0, Math.floor(minY + spanY * 0.32));
+      const scanEnd = Math.min(height - 1, Math.ceil(minY + spanY * 0.68));
+      let darkest = Number.POSITIVE_INFINITY;
+      for (let y = scanStart; y <= scanEnd; y++) {
+        let sum = 0;
+        for (let x = minX; x <= maxX; x++) sum += gray[y * width + x];
+        const mean = sum / Math.max(1, maxX - minX + 1);
+        if (mean < darkest) {
+          darkest = mean;
+          divider = y;
+        }
+      }
+      // Use the divider stripe only when it is visibly darker than the local tile.
+      const localMean = group.reduce((sum, pip) => sum + gray[Math.max(0, Math.min(height - 1, pip.y)) * width + Math.max(0, Math.min(width - 1, pip.x))], 0) / group.length;
+      if (!Number.isFinite(darkest) || darkest > localMean * 0.78) divider = Math.round((minY + maxY) / 2);
+    } else {
+      const scanStart = Math.max(0, Math.floor(minX + spanX * 0.32));
+      const scanEnd = Math.min(width - 1, Math.ceil(minX + spanX * 0.68));
+      let darkest = Number.POSITIVE_INFINITY;
+      for (let x = scanStart; x <= scanEnd; x++) {
+        let sum = 0;
+        for (let y = minY; y <= maxY; y++) sum += gray[y * width + x];
+        const mean = sum / Math.max(1, maxY - minY + 1);
+        if (mean < darkest) {
+          darkest = mean;
+          divider = x;
+        }
+      }
+      const localMean = group.reduce((sum, pip) => sum + gray[Math.max(0, Math.min(height - 1, pip.y)) * width + Math.max(0, Math.min(width - 1, pip.x))], 0) / group.length;
+      if (!Number.isFinite(darkest) || darkest > localMean * 0.78) divider = Math.round((minX + maxX) / 2);
+    }
+
+    const pipsA = orientation === 'vertical'
+      ? group.filter((p) => p.y < divider)
+      : group.filter((p) => p.x < divider);
+    const pipsB = orientation === 'vertical'
+      ? group.filter((p) => p.y > divider)
+      : group.filter((p) => p.x > divider);
+    if (pipsA.length > 12 || pipsB.length > 12 || pipsA.length + pipsB.length < 5) return;
+
+    const { halfA, halfB } = splitTileHalves(bbox, orientation);
+    const sideA = pipsA.length;
+    const sideB = pipsB.length;
+    tiles.push({
+      id: `tile-hough-${index + 1}`,
+      bbox,
+      orientation,
+      halfA: { bbox: halfA, pips: pipsA, count: sideA },
+      halfB: { bbox: halfB, pips: pipsB, count: sideB },
+      sideA,
+      sideB,
+      points: sideA + sideB,
+      confidence: 0.88,
+      label: `[${sideA}|${sideB}]`,
+    });
+  });
+
+  return tiles;
+}
+
+/** Full-frame domino cataloguing from circular pip centres and the centre divider. */
+export function detectDominoesByRadialVoting(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): DetectedTileCV[] {
+  const gray = rgbToGrayscale(rgbaPixels, width, height);
+  const pips = detectPipsByRadialVoting(gray, width, height);
+  return tilesFromRadialPips(pips, gray, width, height);
+}
+
+
 export function detectDominoesOffline(
   rgbaPixels: Uint8ClampedArray | Uint8Array,
   width: number,
@@ -698,6 +1037,37 @@ export function detectDominoesOffline(
     threshold = options.manualThreshold;
   } else {
     threshold = computeOtsuThreshold(gray);
+  }
+
+  // Prefer circle-gradient detection for real photographic tiles. It is robust
+  // to highlights that turn gray/yellow pips into bright blobs in grayscale.
+  const radialTiles = detectDominoesByRadialVoting(rgbaPixels, width, height);
+  if (radialTiles.length > 0) {
+    const radialPieces: DetectedPiece[] = radialTiles.map((tile) => ({
+      id: tile.id,
+      sideA: tile.sideA,
+      sideB: tile.sideB,
+      points: tile.points,
+      label: tile.label,
+      confidence: tile.confidence,
+      box2d: [
+        Math.round((tile.bbox.y / height) * 1000),
+        Math.round((tile.bbox.x / width) * 1000),
+        Math.round(((tile.bbox.y + tile.bbox.height) / height) * 1000),
+        Math.round(((tile.bbox.x + tile.bbox.width) / width) * 1000),
+      ],
+    }));
+    const radialPips = radialTiles.reduce((sum, tile) => sum + tile.points, 0);
+    return {
+      pieces: radialPieces,
+      tiles: radialTiles,
+      totalPoints: radialPieces.reduce((sum, piece) => sum + piece.points, 0),
+      source: 'offline_cv',
+      processingTimeMs: Math.round(performance.now() - startTime),
+      tilesCount: radialTiles.length,
+      pipsTotal: radialPips,
+      thresholdUsed: threshold,
+    };
   }
 
   // 1. Detect Pips with both adaptive local contrast and the classic threshold.
