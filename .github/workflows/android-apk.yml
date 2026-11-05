@@ -40,6 +40,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Build web application
+        run: npm run build
+
       - name: Test domino vision regression suite
         run: npm run test:domino-vision
 
@@ -51,9 +54,6 @@ jobs:
           path: public/samples/*.jpg
           if-no-files-found: error
           retention-days: 7
-
-      - name: Build web application
-        run: npm run build
 
       - name: Generate Android project
         run: npx cap add android
