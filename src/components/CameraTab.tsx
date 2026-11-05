@@ -172,25 +172,72 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     setStreamActive(false);
   };
 
-  const handleCaptureSnapshot = () => {
-    if (!videoRef.current) return;
+  const handleCaptureSnapshot = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Prefer a true still photo from the camera sensor instead of saving a
+    // compressed video-preview frame. This is especially important for small,
+    // glossy yellow and grey pips that lose detail in the live stream.
+    const track = streamRef.current?.getVideoTracks()[0];
+    const ImageCaptureCtor = (window as Window & {
+      ImageCapture?: new (track: MediaStreamTrack) => { takePhoto: () => Promise<Blob> };
+    }).ImageCapture;
+
+    if (track && ImageCaptureCtor) {
+      let objectUrl: string | null = null;
+      try {
+        const capture = new ImageCaptureCtor(track);
+        const stillBlob = await capture.takePhoto();
+        objectUrl = URL.createObjectURL(stillBlob);
+        const stillImage = new Image();
+        await new Promise<void>((resolve, reject) => {
+          stillImage.onload = () => resolve();
+          stillImage.onerror = () => reject(new Error('Não foi possível descodificar a fotografia da câmara.'));
+          stillImage.src = objectUrl!;
+        });
+
+        const sourceWidth = stillImage.naturalWidth || stillImage.width;
+        const sourceHeight = stillImage.naturalHeight || stillImage.height;
+        const captureScale = Math.min(1, 1600 / sourceWidth);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(sourceWidth * captureScale));
+        canvas.height = Math.max(1, Math.round(sourceHeight * captureScale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) throw new Error('Canvas indisponível para processar a fotografia.');
+
+        ctx.drawImage(stillImage, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.93);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        setCapturedImage(dataUrl);
+        setLastRawImageData({ width: canvas.width, height: canvas.height, data: imageData.data });
+        stopCamera();
+        processImage(dataUrl, imageData.data, canvas.width, canvas.height);
+        return;
+      } catch (error) {
+        // ImageCapture is not implemented by every Android WebView. Keep the
+        // existing video-frame path as a safe compatibility fallback.
+        console.debug('High-quality camera still unavailable; using preview frame:', error);
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      }
+    }
+
     const canvas = document.createElement('canvas');
-    const sourceWidth = videoRef.current.videoWidth || 640;
-    const sourceHeight = videoRef.current.videoHeight || 480;
+    const sourceWidth = video.videoWidth || 640;
+    const sourceHeight = video.videoHeight || 480;
     const captureScale = Math.min(1, 1280 / sourceWidth);
     canvas.width = Math.max(1, Math.round(sourceWidth * captureScale));
     canvas.height = Math.max(1, Math.round(sourceHeight * captureScale));
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
-    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
-    setCapturedImage(dataUrl);
-    stopCamera();
-
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    setCapturedImage(dataUrl);
     setLastRawImageData({ width: canvas.width, height: canvas.height, data: imageData.data });
-
+    stopCamera();
     processImage(dataUrl, imageData.data, canvas.width, canvas.height);
   };
 
