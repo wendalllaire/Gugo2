@@ -47,6 +47,7 @@ export const RankingTab: React.FC<RankingTabProps> = ({
   const [showConfig, setShowConfig] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [shareSuccessToast, setShareSuccessToast] = useState<string | null>(null);
+  const [showShareOptions, setShowShareOptions] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<{ id: string; name: string; avatar: string } | null>(null);
   const [roundActionIndex, setRoundActionIndex] = useState<number | null>(null);
   const [roundMoveTarget, setRoundMoveTarget] = useState<number>(0);
@@ -206,6 +207,11 @@ export const RankingTab: React.FC<RankingTabProps> = ({
 
   // Social Share Intent / Web Share API
   const handleShareResults = async () => {
+    setShowShareOptions(true);
+  };
+
+  const handleShareText = async () => {
+    setShowShareOptions(false);
     const shareText = formatSocialShare(
       rankedPlayers,
       settings.currentRound,
@@ -225,6 +231,57 @@ export const RankingTab: React.FC<RankingTabProps> = ({
       }
     } else {
       await copyToClipboard(shareText);
+    }
+  };
+
+  const handleShareImage = async () => {
+    setShowShareOptions(false);
+    const winner = rankedPlayers[0];
+    if (!winner) return;
+    const escapeXml = (value: string) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char] || char));
+    const width = 1000;
+    const rowHeight = 58;
+    const tableTop = 430;
+    const height = tableTop + 110 + rankedPlayers.length * rowHeight;
+    const podium = rankedPlayers.slice(0, 3).map((p, i) => {
+      const x = [170, 500, 830][i];
+      const rank = i + 1;
+      const color = rank === 1 ? '#fbbf24' : rank === 2 ? '#cbd5e1' : '#b45309';
+      return `<g><circle cx="${x}" cy="180" r="62" fill="${color}"/><text x="${x}" y="195" text-anchor="middle" font-size="54">${escapeXml(p.avatar)}</text><text x="${x}" y="280" text-anchor="middle" font-size="30" font-weight="700" fill="#18181b">${rank}º ${escapeXml(p.name)}</text><text x="${x}" y="320" text-anchor="middle" font-size="26" fill="#52525b">${p.totalScore} pontos</text></g>`;
+    }).join('');
+    const header = `<rect x="40" y="${tableTop}" width="920" height="62" rx="12" fill="#27272a"/><text x="65" y="${tableTop + 40}" fill="white" font-size="24" font-weight="700">#</text><text x="130" y="${tableTop + 40}" fill="white" font-size="24" font-weight="700">Jogador</text><text x="900" y="${tableTop + 40}" text-anchor="end" fill="white" font-size="24" font-weight="700">Total</text>`;
+    const rows = rankedPlayers.map((p, i) => {
+      const y = tableTop + 62 + i * rowHeight;
+      return `<rect x="40" y="${y}" width="920" height="${rowHeight}" fill="${i % 2 ? '#f4f4f5' : '#ffffff'}"/><text x="65" y="${y + 38}" font-size="22" fill="#18181b">${p.rank}</text><text x="130" y="${y + 38}" font-size="22" fill="#18181b">${escapeXml(p.avatar)} ${escapeXml(p.name)}</text><text x="900" y="${y + 38}" text-anchor="end" font-size="24" font-weight="700" fill="#18181b">${p.totalScore}</text>`;
+    }).join('');
+    const message = `🎉 Parabéns, ${winner.name}! És o grande vencedor do Dominó Mexicano com ${winner.totalScore} pontos! Obrigado a todos pela partida! 🏆`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fff7ed"/><text x="500" y="65" text-anchor="middle" font-size="38" font-weight="800" fill="#9a3412">🏆 DOMINÓ MEXICANO</text><text x="500" y="115" text-anchor="middle" font-size="28" font-weight="700" fill="#18181b">Pódio da partida</text>${podium}<text x="500" y="390" text-anchor="middle" font-size="25" font-weight="700" fill="#9a3412">🎉 Parabéns, ${escapeXml(winner.name)}! Grande vencedor! 🎉</text>${header}${rows}</svg>`;
+    try {
+      const image = new Image();
+      const imageUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+      await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = reject; image.src = imageUrl; });
+      const canvas = document.createElement('canvas');
+      canvas.width = width * 2; canvas.height = height * 2;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas indisponível');
+      context.scale(2, 2); context.drawImage(image, 0, 0, width, height);
+      URL.revokeObjectURL(imageUrl);
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Falha ao criar imagem')), 'image/png'));
+      const file = new File([blob], 'ranking-domino-mexicano.png', { type: 'image/png' });
+      const shareData = { title: 'Ranking Dominó Mexicano', text: message, files: [file] };
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        await navigator.share(shareData);
+        setShareSuccessToast('Imagem e mensagem prontas para enviar pelo WhatsApp!');
+      } else {
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click();
+        await copyToClipboard(message);
+        setShareSuccessToast('Imagem guardada. Anexe-a no WhatsApp; a mensagem foi copiada.');
+      }
+      setTimeout(() => setShareSuccessToast(null), 4000);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setShareSuccessToast('Não foi possível gerar a imagem para partilhar.');
+      setTimeout(() => setShareSuccessToast(null), 4000);
     }
   };
 
@@ -449,30 +506,6 @@ export const RankingTab: React.FC<RankingTabProps> = ({
         )}
       </div>
 
-      {/* Quick Action: Open Piece Editor for Current Round */}
-      <div className="flex items-center justify-between p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60">
-        <div className="flex items-center gap-2">
-          <Edit2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-            Editar Rodada {settings.currentRound}:
-          </span>
-        </div>
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {players.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => handleOpenPieceEditor(p.id, settings.currentRound - 1)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-xs font-bold border border-zinc-200 dark:border-zinc-700 shadow-xs"
-              title={`Editar peças de ${p.name}`}
-            >
-              <span>{p.avatar}</span>
-              <span className="truncate max-w-[60px]">{p.name}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Full Leaderboard Table & Scores Matrix */}
       <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -626,6 +659,30 @@ export const RankingTab: React.FC<RankingTabProps> = ({
         </div>
       </div>
 
+      {/* Quick Action: Open Piece Editor for Current Round */}
+      <div className="flex items-center justify-between p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60">
+        <div className="flex items-center gap-2">
+          <Edit2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+            Editar Rodada {settings.currentRound}:
+          </span>
+        </div>
+        <div className="flex items-center gap-1 overflow-x-auto">
+          {players.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => handleOpenPieceEditor(p.id, settings.currentRound - 1)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-xs font-bold border border-zinc-200 dark:border-zinc-700 shadow-xs"
+              title={`Editar peças de ${p.name}`}
+            >
+              <span>{p.avatar}</span>
+              <span className="truncate max-w-[60px]">{p.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Round Controller Bar */}
       <div className="flex items-center justify-between bg-zinc-100 dark:bg-zinc-800/60 p-3 rounded-2xl border border-zinc-200 dark:border-zinc-700/60">
         <button
@@ -687,6 +744,18 @@ export const RankingTab: React.FC<RankingTabProps> = ({
           >
             Comemorar 🎊
           </button>
+        </div>
+      )}
+
+      {showShareOptions && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 p-4 space-y-3 shadow-2xl">
+            <h3 className="font-black text-sm text-zinc-900 dark:text-white">Partilhar resultados</h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">Escolhe como queres enviar o resultado da partida.</p>
+            <button onClick={handleShareImage} className="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white text-xs font-bold text-left">🏆 Pódio + tabela em imagem com parabéns ao vencedor (WhatsApp)</button>
+            <button onClick={handleShareText} className="w-full px-3 py-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white text-xs font-bold text-left">Partilhar apenas texto</button>
+            <button onClick={() => setShowShareOptions(false)} className="w-full px-3 py-2 rounded-xl text-xs font-bold text-zinc-500">Cancelar</button>
+          </div>
         </div>
       )}
 
