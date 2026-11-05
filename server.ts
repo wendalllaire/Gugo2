@@ -105,7 +105,7 @@ REGRAS:
 2. As peças podem ser brancas/marfim OU amarelas; não exclua uma peça por ser amarela, por reflexos ou sombras.
 3. Catalogue apenas objetos com contorno físico de dominó: retângulo alongado, proporção aproximada 2:1 e duas metades.
 4. NÃO catalogue mãos, dedos, caixas, cartas, pratos, manchas, reflexos, sombras, padrões da mesa ou objetos fora da escala de uma peça.
-5. Retorne cada peça individualmente. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]"; confidence entre 0 e 1.
+5. Retorne cada peça individualmente. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]"; confidence entre 0 e 1. Preserve a orientação da fotografia: sideA é a metade à esquerda (ou acima, se a peça estiver vertical) e sideB é a metade à direita (ou abaixo). Nunca ordene os valores numericamente.
 6. box2d=[ymin,xmin,ymax,xmax] normalizado 0 a 1000 e deve envolver apenas a peça.
 7. Se não houver uma peça fisicamente plausível, devolva pieces vazio. Nunca invente peças para completar a imagem.
 8. 'totalPoints' é a soma exata de todos os pontos.`;
@@ -190,15 +190,13 @@ REGRAS:
                 shortSide < Math.max(8, minFrameSide * 0.018) ||
                 longSide < Math.max(18, minFrameSide * 0.035) ||
                 longSide > Math.max(frameWidth, frameHeight) * 0.9 ||
-                areaFraction < 0.00045 || areaFraction > 0.18 ||
+                areaFraction < 0.00045 || areaFraction > 0.07 ||
                 aspect < 1.25 || aspect > 2.8 || confidence < 0.55) return [];
 
-            const min = Math.min(rawA, rawB);
-            const max = Math.max(rawA, rawB);
             return [{
               id: `gemini-tile-${Date.now()}-${idx}`,
-              sideA: min,
-              sideB: max,
+              sideA: rawA,
+              sideB: rawB,
               points: min + max,
               label: `[${min}|${max}]`,
               confidence: Math.min(1, confidence),
