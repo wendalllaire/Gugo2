@@ -156,7 +156,7 @@ test('single 0-n sample photos preserve the physical left-to-right side order', 
   for (const name of sampleNames) {
     const pair = expectedPairsFromFilename(name);
     assert.equal(pair.length, 1, `Expected one labeled domino in ${name}`);
-    const expectedN = Number(name.match(/0-(\\d{1,2})/)?.[1]);
+    const expectedN = Number(name.match(/0-(\d{1,2})/)?.[1]);
     const image = decodeSample(name);
     const result = detectDominoesOffline(image.data, image.width, image.height);
     assert.equal(result.pieces.length, 1, `${name}: expected exactly one piece, got ${result.pieces.length}`);
