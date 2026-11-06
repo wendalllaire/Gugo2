@@ -1,5 +1,5 @@
 name: Android Debug APK
-# Build the debug APK for manual device testing even when vision regression tests report failures.
+# Publish a debug APK only when the vision regression suite passes.
 
 on:
   push:
@@ -46,7 +46,6 @@ jobs:
 
       - name: Test domino vision regression suite
         id: vision_regression
-        continue-on-error: true
         run: npm run test:domino-vision
 
       - name: Upload labelled vision samples for QA
