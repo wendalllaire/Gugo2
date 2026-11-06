@@ -674,10 +674,10 @@ export function isPlausibleDominoBox(
     bbox.y + bbox.height <= frameHeight - frameMargin;
   return staysInsideFrame &&
     areaFraction >= 0.002 && areaFraction <= 0.07 &&
-    shortSide >= Math.max(16, frameShortSide * 0.032) &&
-    longSide >= Math.max(32, frameShortSide * 0.06) &&
+    shortSide >= Math.max(20, frameShortSide * 0.06) &&
+    longSide >= Math.max(40, frameShortSide * 0.10) &&
     longSide <= frameLongSide * 0.42 &&
-    aspect >= 1.35 && aspect <= 2.75;
+    aspect >= 1.5 && aspect <= 2.75;
 }
 
 /** Yellow hue/chroma mask; works when a yellow tile is not bright enough in grayscale. */
@@ -755,7 +755,76 @@ function hasDominoDivider(
   return Number.isFinite(darkest) && darkest < Math.min(145, faceMean * 0.72);
 }
 
-/** Yellow pip mask kept separate from the white domino-body mask. */
+/** Rejoins the two nearly-square face components when a black divider
+ * separates the halves completely in the binary body mask. */
+function mergeAdjacentBodyComponents(
+  blobs: ComponentBlob[],
+  width: number,
+  height: number
+): ComponentBlob[] {
+  const candidates = [...blobs];
+  const frameShort = Math.min(width, height);
+  const maxGap = Math.max(8, frameShort * 0.035);
+
+  for (let i = 0; i < blobs.length; i++) {
+    const a = blobs[i];
+    const aw = a.maxX - a.minX + 1;
+    const ah = a.maxY - a.minY + 1;
+    const aShape = Math.max(aw, ah) / Math.max(1, Math.min(aw, ah));
+    if (aShape > 1.8) continue;
+
+    for (let j = i + 1; j < blobs.length; j++) {
+      const b = blobs[j];
+      const bw = b.maxX - b.minX + 1;
+      const bh = b.maxY - b.minY + 1;
+      const bShape = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
+      if (bShape > 1.8) continue;
+
+      const overlapY = Math.max(0, Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY) + 1);
+      const overlapX = Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) + 1);
+      const gapX = Math.max(0, Math.max(a.minX, b.minX) - Math.min(a.maxX, b.maxX) - 1);
+      const gapY = Math.max(0, Math.max(a.minY, b.minY) - Math.min(a.maxY, b.maxY) - 1);
+      const sameHeight = Math.min(ah, bh) / Math.max(ah, bh) >= 0.68;
+      const sameWidth = Math.min(aw, bw) / Math.max(aw, bw) >= 0.68;
+      const horizontalPair = sameHeight &&
+        overlapY / Math.max(1, Math.min(ah, bh)) >= 0.72 && gapX <= maxGap;
+      const verticalPair = sameWidth &&
+        overlapX / Math.max(1, Math.min(aw, bw)) >= 0.72 && gapY <= maxGap;
+      if (!horizontalPair && !verticalPair) continue;
+
+      const bbox = {
+        x: Math.min(a.minX, b.minX),
+        y: Math.min(a.minY, b.minY),
+        width: Math.max(a.maxX, b.maxX) - Math.min(a.minX, b.minX) + 1,
+        height: Math.max(a.maxY, b.maxY) - Math.min(a.minY, b.minY) + 1,
+      };
+      if (!isPlausibleDominoBodyBox(bbox, width, height)) continue;
+      if (candidates.some((existing) =>
+        existing.minX === bbox.x && existing.minY === bbox.y &&
+        existing.maxX === bbox.x + bbox.width - 1 &&
+        existing.maxY === bbox.y + bbox.height - 1
+      )) continue;
+
+      const area = a.area + b.area;
+      candidates.push({
+        id: -((i + 1) * 10000 + j + 1),
+        minX: bbox.x,
+        maxX: bbox.x + bbox.width - 1,
+        minY: bbox.y,
+        maxY: bbox.y + bbox.height - 1,
+        area,
+        perimeter: 2 * (bbox.width + bbox.height),
+        centroidX: Math.round((a.centroidX * a.area + b.centroidX * b.area) / Math.max(1, area)),
+        centroidY: Math.round((a.centroidY * a.area + b.centroidY * b.area) / Math.max(1, area)),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+/** Yellow pip mask; only compact, approximately circular yellow components
+ * are pips. A solid yellow domino face is intentionally excluded. */
 export function buildYellowPipMask(
   rgbaPixels: Uint8ClampedArray | Uint8Array,
   width: number,
@@ -764,32 +833,44 @@ export function buildYellowPipMask(
   if (width <= 0 || height <= 0 || rgbaPixels.length !== width * height * 4) {
     throw new Error('Invalid RGBA frame dimensions');
   }
-  const mask = new Uint8Array(width * height);
-  for (let i = 0; i < mask.length; i++) {
+  const raw = new Uint8Array(width * height);
+  for (let i = 0; i < raw.length; i++) {
     const offset = i * 4;
     if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
-      mask[i] = 1;
+      raw[i] = 1;
+    }
+  }
+
+  const frameShort = Math.min(width, height);
+  const minRadius = Math.max(2.5, frameShort * 0.005);
+  const maxRadius = Math.max(minRadius + 1, frameShort * 0.06);
+  const blobs = findConnectedComponents(
+    raw, width, height,
+    Math.max(4, Math.PI * minRadius * minRadius * 0.5),
+    Math.min(width * height * 0.02, Math.PI * maxRadius * maxRadius * 1.6)
+  );
+  const mask = new Uint8Array(raw.length);
+  for (const blob of blobs) {
+    const blobWidth = blob.maxX - blob.minX + 1;
+    const blobHeight = blob.maxY - blob.minY + 1;
+    const aspect = blobWidth / Math.max(1, blobHeight);
+    const radius = Math.sqrt(blob.area / Math.PI);
+    if (aspect < 0.55 || aspect > 1.8 || radius < minRadius || radius > maxRadius) continue;
+    if (computeCircularity(blob.area, blob.perimeter) < 0.24) continue;
+    for (let y = blob.minY; y <= blob.maxY; y++) {
+      for (let x = blob.minX; x <= blob.maxX; x++) {
+        const index = y * width + x;
+        if (raw[index]) mask[index] = 1;
+      }
     }
   }
   return mask;
 }
 
-function percentileGrayThreshold(gray: Uint8Array, percentile: number): number {
-  const histogram = new Uint32Array(256);
-  for (let i = 0; i < gray.length; i++) histogram[gray[i]]++;
-  const target = Math.max(1, Math.ceil(gray.length * Math.min(0.999, Math.max(0, percentile))));
-  let cumulative = 0;
-  for (let value = 0; value < histogram.length; value++) {
-    cumulative += histogram[value];
-    if (cumulative >= target) return value;
-  }
-  return 255;
-}
-
 /**
- * Isolates neutral ivory/white domino faces from warm wood and other coloured
- * backgrounds. The percentile threshold adapts to exposure without allowing
- * large bright background regions to become tile candidates.
+ * Separates neutral ivory/white domino faces from coloured backgrounds. Otsu
+ * plus a small offset adapts to exposure while retaining the complete tile
+ * face, rather than clipping shadowed edges at a high percentile.
  */
 export function buildNeutralDominoBodyMask(
   rgbaPixels: Uint8ClampedArray | Uint8Array,
@@ -800,14 +881,14 @@ export function buildNeutralDominoBodyMask(
   if (width <= 0 || height <= 0 || gray.length !== width * height || rgbaPixels.length !== width * height * 4) {
     throw new Error('Invalid frame dimensions');
   }
-  const threshold = Math.max(computeOtsuThreshold(gray) + 12, percentileGrayThreshold(gray, 0.88));
+  const threshold = Math.max(40, computeOtsuThreshold(gray) + 8);
   const mask = new Uint8Array(gray.length);
   for (let i = 0; i < gray.length; i++) {
     if (gray[i] < threshold) continue;
     const offset = i * 4;
     const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
     const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-    if (chroma <= Math.max(22, gray[i] * 0.14)) mask[i] = 1;
+    if (chroma <= Math.max(28, gray[i] * 0.16)) mask[i] = 1;
   }
   return mask;
 }
@@ -1263,13 +1344,15 @@ export function detectDominoesOffline(
     binPips[i] = classicPips[i] || adaptivePips[i] || yellowPips[i] ? 1 : 0;
   }
 
-  // 2. Detect neutral ivory/white bodies, while retaining chromatic yellow
-  // surfaces for genuinely yellow tiles. Yellow pip pixels are also included
-  // in the independent pip mask above.
+  // 2. Detect neutral ivory/white bodies and add all chromatic yellow surface
+  // pixels only to the body mask. Yellow pip counting above keeps only round
+  // yellow components, so a yellow tile face cannot become one giant pip.
   const binTiles = buildNeutralDominoBodyMask(rgbaPixels, gray, width, height);
-  const yellowBodyMask = buildYellowPipMask(rgbaPixels, width, height);
   for (let i = 0; i < binTiles.length; i++) {
-    if (yellowBodyMask[i]) binTiles[i] = 1;
+    const offset = i * 4;
+    if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
+      binTiles[i] = 1;
+    }
   }
 
   // Reject tiny specks and oversized regions at the connected-component stage.
@@ -1278,7 +1361,8 @@ export function detectDominoesOffline(
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
-  const candidateBlobs = tileBlobs.filter((b) => {
+  const mergedBodyBlobs = mergeAdjacentBodyComponents(tileBlobs, width, height);
+  const candidateBlobs = mergedBodyBlobs.filter((b) => {
     const bw = b.maxX - b.minX + 1;
     const bh = b.maxY - b.minY + 1;
     const bbox = { x: b.minX, y: b.minY, width: bw, height: bh };
@@ -1297,8 +1381,10 @@ export function detectDominoesOffline(
       const bbox = { x: blob.minX, y: blob.minY, width: bw, height: bh };
 
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
-      const pipsA = detectPipsInHalf(binPips, width, halfA);
-      const pipsB = detectPipsInHalf(binPips, width, halfB);
+      const minPipRadius = Math.max(3, Math.min(bw, bh) * 0.04);
+      const maxPipRadius = Math.max(minPipRadius + 1, Math.min(40, Math.min(bw, bh) * 0.24));
+      const pipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
+      const pipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
 
       const countA = pipsA.length;
       const countB = pipsB.length;
