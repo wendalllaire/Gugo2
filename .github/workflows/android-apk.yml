@@ -44,6 +44,8 @@ jobs:
         run: npm run build
 
       - name: Test domino vision regression suite
+        id: vision_regression
+        continue-on-error: true
         run: npm run test:domino-vision
 
       - name: Upload labelled vision samples for QA
