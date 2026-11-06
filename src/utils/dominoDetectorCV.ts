@@ -1274,7 +1274,7 @@ export function detectDominoesOffline(
 
   // Reject tiny specks and oversized regions at the connected-component stage.
   const minTileArea = (width * height) * 0.00035;
-  const maxTileArea = (width * height) * 0.24;
+  const maxTileArea = (width * height) * 0.45;
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
