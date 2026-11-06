@@ -162,6 +162,18 @@ test('detectDominoesOffline detects multiple dominoes on synthetic image', () =>
     }
   };
 
+  // Physical separator bars between the two halves.
+  for (let x = 30; x < 90; x++) {
+    let i = (90 * w + x) * 4;
+    rgba[i] = rgba[i + 1] = rgba[i + 2] = 18;
+    i = (210 * w + x) * 4;
+    rgba[i] = rgba[i + 1] = rgba[i + 2] = 18;
+  }
+  for (let x = 180; x < 240; x++) {
+    const i = (90 * w + x) * 4;
+    rgba[i] = rgba[i + 1] = rgba[i + 2] = 18;
+  }
+
   // Pips on Tile 1
   drawPip(48, 55, 4);
   drawPip(72, 65, 4);
@@ -287,6 +299,10 @@ test('yellow domino body is detected by chroma even when grayscale threshold is 
       }
     }
   };
+  for (let y = 147; y < 153; y++) for (let x = 175; x < 225; x++) {
+    const i = (y * w + x) * 4;
+    rgba[i] = rgba[i + 1] = rgba[i + 2] = 15;
+  }
   drawPip(200, 125); drawPip(200, 175);
   const result = detectDominoesOffline(rgba, w, h);
   assert.ok(result.tiles.length >= 1, 'Yellow domino should be detected');
