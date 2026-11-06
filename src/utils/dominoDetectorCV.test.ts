@@ -336,6 +336,18 @@ test('yellow pip chroma mask isolates yellow dots independently from the white t
   assert.equal(pips.length, 3, `Expected 3 yellow pips, got ${pips.length}`);
 });
 
+test('a solid yellow domino face is not misclassified as yellow pips', () => {
+  const width = 120;
+  const height = 90;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = 245; rgba[i * 4 + 1] = 205; rgba[i * 4 + 2] = 45; rgba[i * 4 + 3] = 255;
+  }
+  const mask = buildYellowPipMask(rgba, width, height);
+  assert.equal(mask.reduce((sum, value) => sum + value, 0), 0,
+    'a large yellow surface must be kept out of the pip mask');
+});
+
 test('neutral domino body mask survives dim exposure and rejects warm tabletop pixels', () => {
   const width = 400;
   const height = 300;
