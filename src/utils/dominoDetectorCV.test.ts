@@ -11,6 +11,8 @@ import {
   clusterPipsIntoDominoes,
   detectAllPips,
   buildAdaptivePipMask,
+  buildYellowPipMask,
+  buildNeutralDominoBodyMask,
   DetectedPip,
 } from './dominoDetectorCV.ts';
 
@@ -288,6 +290,71 @@ test('yellow domino body is detected by chroma even when grayscale threshold is 
   drawPip(200, 125); drawPip(200, 175);
   const result = detectDominoesOffline(rgba, w, h);
   assert.ok(result.tiles.length >= 1, 'Yellow domino should be detected');
+});
+
+test('yellow pip chroma mask isolates yellow dots independently from the white tile face', () => {
+  const width = 180;
+  const height = 120;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = 45; rgba[i * 4 + 1] = 70; rgba[i * 4 + 2] = 48; rgba[i * 4 + 3] = 255;
+  }
+  for (let y = 20; y < 100; y++) for (let x = 18; x < 162; x++) {
+    const i = (y * width + x) * 4;
+    rgba[i] = 238; rgba[i + 1] = 235; rgba[i + 2] = 229;
+  }
+  const drawYellow = (cx: number, cy: number, radius: number) => {
+    for (let y = cy - radius; y <= cy + radius; y++) for (let x = cx - radius; x <= cx + radius; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2) {
+        const i = (y * width + x) * 4;
+        rgba[i] = 220; rgba[i + 1] = 178; rgba[i + 2] = 18;
+      }
+    }
+  };
+  drawYellow(48, 44, 5);
+  drawYellow(82, 76, 5);
+  drawYellow(128, 44, 5);
+
+  const mask = buildYellowPipMask(rgba, width, height);
+  const pips = detectAllPips(mask, width, height, 2.5, 12, 0.25);
+  assert.equal(pips.length, 3, `Expected 3 yellow pips, got ${pips.length}`);
+});
+
+test('neutral domino body mask survives dim exposure and rejects warm tabletop pixels', () => {
+  const width = 400;
+  const height = 300;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = 204; rgba[i * 4 + 1] = 180; rgba[i * 4 + 2] = 168; rgba[i * 4 + 3] = 255;
+  }
+  const drawTile = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4;
+      rgba[i] = 238; rgba[i + 1] = 235; rgba[i + 2] = 229;
+    }
+  };
+  drawTile(70, 65, 145, 245);
+  drawTile(250, 65, 325, 245);
+
+  const dim = new Uint8ClampedArray(rgba.length);
+  for (let i = 0; i < rgba.length; i += 4) {
+    const r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    for (let c = 0; c < 3; c++) {
+      const value = c === 0 ? r : c === 1 ? g : b;
+      const saturated = luma + (value - luma) * 0.45;
+      dim[i + c] = Math.max(0, Math.min(255, Math.round(((saturated - 128) * 0.85 + 128) * 0.78)));
+    }
+    dim[i + 3] = 255;
+  }
+
+  const gray = rgbToGrayscale(dim, width, height);
+  const mask = buildNeutralDominoBodyMask(dim, gray, width, height);
+  const blobs = findConnectedComponents(mask, width, height, width * height * 0.001, width * height * 0.3);
+  const candidates = blobs.filter((blob) => blob.area > width * height * 0.025);
+  assert.equal(candidates.length, 2, `Expected 2 domino bodies, got ${candidates.length}`);
+  assert.ok(candidates.every((blob) => blob.minX > 50 && blob.maxX < 350),
+    'warm background pixels must not expand the detected tile bounds');
 });
 
 test('domino geometry filter rejects tiny and oversized objects but accepts a tile', async () => {
