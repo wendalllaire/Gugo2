@@ -310,16 +310,16 @@ test('yellow domino body is detected by chroma even when grayscale threshold is 
 });
 
 test('chromatic pip mask detects blue, red and green dots on a light face', () => {
-  const width = 180;
-  const height = 100;
+  const width = 300;
+  const height = 300;
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let i = 0; i < width * height; i++) {
     rgba[i * 4] = 245; rgba[i * 4 + 1] = 240; rgba[i * 4 + 2] = 225; rgba[i * 4 + 3] = 255;
   }
   const dots = [
-    { cx: 35, cy: 50, color: [35, 125, 190] },
-    { cx: 90, cy: 50, color: [190, 55, 65] },
-    { cx: 145, cy: 50, color: [55, 145, 80] },
+    { cx: 50, cy: 150, color: [35, 125, 190] },
+    { cx: 150, cy: 150, color: [190, 55, 65] },
+    { cx: 250, cy: 150, color: [55, 145, 80] },
   ];
   for (const dot of dots) {
     for (let y = dot.cy - 10; y <= dot.cy + 10; y++) {
