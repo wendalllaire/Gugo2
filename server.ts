@@ -152,10 +152,13 @@ REGRAS:
                       confidence: { type: Type.NUMBER },
                       box2d: {
                         type: Type.ARRAY,
+                        description: 'Coordenadas [ymin,xmin,ymax,xmax] normalizadas entre 0 e 1000, para UMA peça',
+                        minItems: 4,
+                        maxItems: 4,
                         items: { type: Type.INTEGER },
                       },
                     },
-                    required: ['sideA', 'sideB', 'points', 'label', 'box2d'],
+                    required: ['sideA', 'sideB', 'points', 'label', 'confidence', 'box2d'],
                   },
                 },
                 totalPoints: { type: Type.INTEGER },
@@ -176,7 +179,7 @@ REGRAS:
             const box = Array.isArray(p.box2d) && p.box2d.length === 4 ? p.box2d.map(Number) : null;
             if (!Number.isInteger(rawA) || !Number.isInteger(rawB) ||
                 rawA < 0 || rawA > 12 || rawB < 0 || rawB > 12 ||
-                !box || box.some((v: number) => !Number.isFinite(v) || v < 0 || v > 1000)) return [];
+                !box || box.some((v: number) => !Number.isInteger(v) || v < 0 || v > 1000)) return [];
 
             const [yMin, xMin, yMax, xMax] = box;
             const boxWidth = xMax - xMin;
