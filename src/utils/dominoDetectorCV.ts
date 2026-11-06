@@ -673,7 +673,7 @@ export function isPlausibleDominoBox(
     bbox.x + bbox.width <= frameWidth - frameMargin &&
     bbox.y + bbox.height <= frameHeight - frameMargin;
   return staysInsideFrame &&
-    areaFraction >= 0.002 && areaFraction <= 0.06 &&
+    areaFraction >= 0.002 && areaFraction <= 0.07 &&
     shortSide >= Math.max(16, frameShortSide * 0.032) &&
     longSide >= Math.max(32, frameShortSide * 0.06) &&
     longSide <= frameLongSide * 0.42 &&
@@ -684,6 +684,63 @@ export function isPlausibleDominoBox(
 export function isYellowTilePixel(r: number, g: number, b: number): boolean {
   return r >= 75 && g >= 65 && b <= Math.min(r, g) * 0.84 &&
     r - b >= 25 && g - b >= 18 && g >= r * 0.45 && r >= g * 0.82;
+}
+
+/** Yellow pip mask kept separate from the white domino-body mask. */
+export function buildYellowPipMask(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  if (width <= 0 || height <= 0 || rgbaPixels.length !== width * height * 4) {
+    throw new Error('Invalid RGBA frame dimensions');
+  }
+  const mask = new Uint8Array(width * height);
+  for (let i = 0; i < mask.length; i++) {
+    const offset = i * 4;
+    if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
+      mask[i] = 1;
+    }
+  }
+  return mask;
+}
+
+function percentileGrayThreshold(gray: Uint8Array, percentile: number): number {
+  const histogram = new Uint32Array(256);
+  for (let i = 0; i < gray.length; i++) histogram[gray[i]]++;
+  const target = Math.max(1, Math.ceil(gray.length * Math.min(0.999, Math.max(0, percentile))));
+  let cumulative = 0;
+  for (let value = 0; value < histogram.length; value++) {
+    cumulative += histogram[value];
+    if (cumulative >= target) return value;
+  }
+  return 255;
+}
+
+/**
+ * Isolates neutral ivory/white domino faces from warm wood and other coloured
+ * backgrounds. The percentile threshold adapts to exposure without allowing
+ * large bright background regions to become tile candidates.
+ */
+export function buildNeutralDominoBodyMask(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  gray: Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  if (width <= 0 || height <= 0 || gray.length !== width * height || rgbaPixels.length !== width * height * 4) {
+    throw new Error('Invalid frame dimensions');
+  }
+  const threshold = Math.max(computeOtsuThreshold(gray) + 12, percentileGrayThreshold(gray, 0.88));
+  const mask = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    if (gray[i] < threshold) continue;
+    const offset = i * 4;
+    const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    if (chroma <= Math.max(22, gray[i] * 0.14)) mask[i] = 1;
+  }
+  return mask;
 }
 
 /**
@@ -1131,26 +1188,19 @@ export function detectDominoesOffline(
   const pipThreshold = Math.min(220, Math.max(105, threshold + 12));
   const classicPips = binarize(gray, pipThreshold, options.invertColors ?? false);
   const adaptivePips = buildAdaptivePipMask(gray, width, height, options.invertColors ?? false);
+  const yellowPips = buildYellowPipMask(rgbaPixels, width, height);
   const binPips = new Uint8Array(gray.length);
   for (let i = 0; i < binPips.length; i++) {
-    binPips[i] = classicPips[i] || adaptivePips[i] ? 1 : 0;
+    binPips[i] = classicPips[i] || adaptivePips[i] || yellowPips[i] ? 1 : 0;
   }
 
-  // 2. Detect Domino Bodies: Light ivory surfaces
-  const tileThreshold = Math.min(235, threshold + 18);
-  const binTiles = binarize(gray, tileThreshold, true);
-
-  // Explicit chroma path for yellow pieces, merged with the ivory/white mask.
-  for (let i = 0; i < width * height; i++) {
-    const offset = i * 4;
-    if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
-      binTiles[i] = 1;
-    }
-  }
+  // 2. Detect domino bodies from neutral ivory/white surfaces, separately from
+  // yellow pips. A global bright-pixel mask also selects the wooden tabletop.
+  const binTiles = buildNeutralDominoBodyMask(rgbaPixels, gray, width, height);
 
   // Reject tiny specks and oversized regions at the connected-component stage.
-  const minTileArea = (width * height) * 0.00045;
-  const maxTileArea = (width * height) * 0.14;
+  const minTileArea = (width * height) * 0.00035;
+  const maxTileArea = (width * height) * 0.24;
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
@@ -1159,7 +1209,7 @@ export function detectDominoesOffline(
     const bh = b.maxY - b.minY + 1;
     const bbox = { x: b.minX, y: b.minY, width: bw, height: bh };
     const rectangularity = b.area / Math.max(1, bw * bh);
-    return isPlausibleDominoBox(bbox, width, height) && rectangularity >= 0.42;
+    return isPlausibleDominoBox(bbox, width, height) && rectangularity >= 0.24;
   });
 
   const detectedTiles: DetectedTileCV[] = [];
