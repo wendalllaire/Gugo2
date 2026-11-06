@@ -673,7 +673,7 @@ export function isPlausibleDominoBox(
     bbox.x + bbox.width <= frameWidth - frameMargin &&
     bbox.y + bbox.height <= frameHeight - frameMargin;
   return staysInsideFrame &&
-    areaFraction >= 0.002 && areaFraction <= 0.10 &&
+    areaFraction >= 0.002 && areaFraction <= 0.14 &&
     shortSide >= Math.max(16, frameShortSide * 0.032) &&
     longSide >= Math.max(32, frameShortSide * 0.06) &&
     longSide <= frameLongSide * 0.55 &&
