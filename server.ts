@@ -204,8 +204,8 @@ REGRAS:
             if (xMax <= xMin || yMax <= yMin || !staysInsideFrame ||
                 shortSide < Math.max(16, minFrameSide * 0.032) ||
                 longSide < Math.max(32, minFrameSide * 0.06) ||
-                longSide > maxFrameSide * 0.55 ||
-                areaFraction < 0.002 || areaFraction > 0.14 ||
+                longSide > maxFrameSide * 0.42 ||
+                areaFraction < 0.002 || areaFraction > 0.06 ||
                 aspect < 1.35 || aspect > 2.75 || confidence < 0.55) return [];
 
             return [{
