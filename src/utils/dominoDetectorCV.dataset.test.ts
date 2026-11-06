@@ -180,3 +180,30 @@ test('all labeled sample photos keep their gold standard under rotations and col
   }
   assertNoMismatches('rotated and color-adjusted sample photos', errors);
 });
+
+const fullSequenceNames = ['Todas peças v1.jpg', 'Todas peças v2.jpg'];
+const fullSequenceExpected = Array.from({ length: 12 }, (_, index) => `0-${index + 1}`).sort();
+
+test('both full-sequence photos contain exactly the 0-1 through 0-12 set', () => {
+  const errors: string[] = [];
+  const configs = [
+    { brightness: 1, contrast: 1, saturation: 1, label: 'neutral' },
+    { brightness: 0.92, contrast: 1.12, saturation: 1.15, label: 'slight-dim-contrast-saturation' },
+    { brightness: 1.08, contrast: 0.9, saturation: 0.85, label: 'slight-bright-soft-muted' },
+  ];
+  const rotations = [0, 90, 180, 270] as const;
+
+  for (const name of fullSequenceNames) {
+    const image = decodeSample(name);
+    for (const degrees of rotations) {
+      const rotated = rotateRgba(image.data, image.width, image.height, degrees);
+      for (const config of configs) {
+        const rgba = adjustColor(rotated.data, config.brightness, config.contrast, config.saturation);
+        const transform = `rotation=${degrees}; ${config.label}`;
+        const mismatch = compareWithGoldStandard(name, rgba, rotated.width, rotated.height, fullSequenceExpected, transform);
+        if (mismatch) errors.push(mismatch);
+      }
+    }
+  }
+  assertNoMismatches('full-sequence sample photos', errors);
+});
