@@ -304,4 +304,6 @@ test('domino geometry filter rejects tiny and oversized objects but accepts a ti
   assert.equal(isPlausibleDominoBox({ x: 0, y: 300, width: 200, height: 100 }, 1280, 1707), false,
     'objects clipped by the image edge must be rejected');
   assert.equal(isPlausibleDominoBox({ x: 500, y: 600, width: 200, height: 100 }, 1280, 1707), true);
+  assert.equal(isPlausibleDominoBox({ x: 100, y: 100, width: 520, height: 300 }, 1280, 1707), false,
+    'a merged multi-piece/table region must not pass as one domino');
 });
