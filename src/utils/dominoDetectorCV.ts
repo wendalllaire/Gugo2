@@ -686,6 +686,75 @@ export function isYellowTilePixel(r: number, g: number, b: number): boolean {
     r - b >= 25 && g - b >= 18 && g >= r * 0.45 && r >= g * 0.82;
 }
 
+/** Geometry gate for a body-segmented tile. Larger close-up pieces are allowed
+ * only on this path; pip-only proposals continue to use the stricter gate above. */
+function isPlausibleDominoBodyBox(
+  bbox: { x: number; y: number; width: number; height: number },
+  frameWidth: number,
+  frameHeight: number
+): boolean {
+  if (frameWidth <= 0 || frameHeight <= 0 || bbox.width <= 0 || bbox.height <= 0) return false;
+  const frameShort = Math.min(frameWidth, frameHeight);
+  const frameLong = Math.max(frameWidth, frameHeight);
+  const shortSide = Math.min(bbox.width, bbox.height);
+  const longSide = Math.max(bbox.width, bbox.height);
+  const areaFraction = (bbox.width * bbox.height) / (frameWidth * frameHeight);
+  const aspect = longSide / shortSide;
+  const margin = Math.max(2, frameShort * 0.006);
+  const inside = bbox.x >= margin && bbox.y >= margin &&
+    bbox.x + bbox.width <= frameWidth - margin &&
+    bbox.y + bbox.height <= frameHeight - margin;
+  return inside &&
+    areaFraction >= 0.01 && areaFraction <= 0.42 &&
+    shortSide >= Math.max(20, frameShort * 0.10) &&
+    longSide >= Math.max(40, frameShort * 0.18) &&
+    longSide <= frameLong * 0.94 &&
+    aspect >= 1.55 && aspect <= 2.85;
+}
+
+/** Verifies the dark separator stripe through the centre of a candidate body. */
+function hasDominoDivider(
+  gray: Uint8Array,
+  frameWidth: number,
+  frameHeight: number,
+  bbox: { x: number; y: number; width: number; height: number },
+  orientation: 'vertical' | 'horizontal'
+): boolean {
+  const x0 = Math.max(0, Math.floor(bbox.x + bbox.width * 0.12));
+  const x1 = Math.min(frameWidth - 1, Math.ceil(bbox.x + bbox.width * 0.88));
+  const y0 = Math.max(0, Math.floor(bbox.y + bbox.height * 0.12));
+  const y1 = Math.min(frameHeight - 1, Math.ceil(bbox.y + bbox.height * 0.88));
+  let total = 0, count = 0, darkest = Number.POSITIVE_INFINITY;
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      total += gray[y * frameWidth + x];
+      count++;
+    }
+  }
+  if (count === 0) return false;
+  const faceMean = total / count;
+
+  if (orientation === 'horizontal') {
+    const start = Math.max(x0, Math.floor(bbox.x + bbox.width * 0.34));
+    const end = Math.min(x1, Math.ceil(bbox.x + bbox.width * 0.66));
+    for (let x = start; x <= end; x++) {
+      let sum = 0;
+      for (let y = y0; y <= y1; y++) sum += gray[y * frameWidth + x];
+      darkest = Math.min(darkest, sum / Math.max(1, y1 - y0 + 1));
+    }
+  } else {
+    const start = Math.max(y0, Math.floor(bbox.y + bbox.height * 0.34));
+    const end = Math.min(y1, Math.ceil(bbox.y + bbox.height * 0.66));
+    for (let y = start; y <= end; y++) {
+      let sum = 0;
+      for (let x = x0; x <= x1; x++) sum += gray[y * frameWidth + x];
+      darkest = Math.min(darkest, sum / Math.max(1, x1 - x0 + 1));
+    }
+  }
+  return Number.isFinite(darkest) && darkest < Math.min(145, faceMean * 0.72);
+}
+
 /** Yellow pip mask kept separate from the white domino-body mask. */
 export function buildYellowPipMask(
   rgbaPixels: Uint8ClampedArray | Uint8Array,
@@ -1194,9 +1263,14 @@ export function detectDominoesOffline(
     binPips[i] = classicPips[i] || adaptivePips[i] || yellowPips[i] ? 1 : 0;
   }
 
-  // 2. Detect domino bodies from neutral ivory/white surfaces, separately from
-  // yellow pips. A global bright-pixel mask also selects the wooden tabletop.
+  // 2. Detect neutral ivory/white bodies, while retaining chromatic yellow
+  // surfaces for genuinely yellow tiles. Yellow pip pixels are also included
+  // in the independent pip mask above.
   const binTiles = buildNeutralDominoBodyMask(rgbaPixels, gray, width, height);
+  const yellowBodyMask = buildYellowPipMask(rgbaPixels, width, height);
+  for (let i = 0; i < binTiles.length; i++) {
+    if (yellowBodyMask[i]) binTiles[i] = 1;
+  }
 
   // Reject tiny specks and oversized regions at the connected-component stage.
   const minTileArea = (width * height) * 0.00035;
@@ -1209,7 +1283,7 @@ export function detectDominoesOffline(
     const bh = b.maxY - b.minY + 1;
     const bbox = { x: b.minX, y: b.minY, width: bw, height: bh };
     const rectangularity = b.area / Math.max(1, bw * bh);
-    return isPlausibleDominoBox(bbox, width, height) && rectangularity >= 0.24;
+    return isPlausibleDominoBodyBox(bbox, width, height) && rectangularity >= 0.24;
   });
 
   const detectedTiles: DetectedTileCV[] = [];
@@ -1228,6 +1302,12 @@ export function detectDominoesOffline(
 
       const countA = pipsA.length;
       const countB = pipsB.length;
+      // A body candidate needs a real centre separator and at least one
+      // circular pip; this prevents bright boards, trays and large objects
+      // from becoming dominoes solely because of their rectangular shape.
+      if (countA > 12 || countB > 12 || countA + countB === 0 ||
+          !hasDominoDivider(gray, width, height, bbox, orientation)) return;
+
       // Preserve physical orientation: A is left/top, B is right/bottom.
       const sideA = countA;
       const sideB = countB;
