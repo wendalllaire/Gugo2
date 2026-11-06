@@ -14,6 +14,7 @@ import {
   buildYellowPipMask,
   buildChromaticPipMask,
   buildNeutralDominoBodyMask,
+  splitMergedBodyComponents,
   DetectedPip,
 } from './dominoDetectorCV.ts';
 
@@ -412,6 +413,29 @@ test('neutral domino body mask survives dim exposure and rejects warm tabletop p
   assert.equal(candidates.length, 2, `Expected 2 domino bodies, got ${candidates.length}`);
   assert.ok(candidates.every((blob) => blob.minX > 50 && blob.maxX < 350),
     'warm background pixels must not expand the detected tile bounds');
+});
+
+
+test('split merged touching white domino bodies only when a dark seam supports it', () => {
+  const width = 400, height = 400;
+  const gray = new Uint8Array(width * height);
+  gray.fill(220);
+  const blob = {
+    id: 7, minX: 40, maxX: 359, minY: 40, maxY: 359,
+    area: 320 * 320, perimeter: 1280, centroidX: 200, centroidY: 200,
+  };
+  // A narrow vertical dark boundary separates two upright, touching tiles.
+  for (let y = 65; y < 335; y++) gray[y * width + 200] = 25;
+  const split = splitMergedBodyComponents([blob], gray, width, height);
+  assert.equal(split.length, 2, 'near-square merged component should become two domino bodies');
+  assert.ok(split.every(part => part.maxY - part.minY + 1 > (part.maxX - part.minX + 1) * 1.5));
+  assert.ok(split[0].maxX < split[1].minX, 'left/right physical order must be preserved');
+
+  const noSeam = new Uint8Array(width * height);
+  noSeam.fill(220);
+  const untouched = splitMergedBodyComponents([blob], noSeam, width, height);
+  assert.equal(untouched.length, 1, 'a single broad bright object without a seam must not be split');
+  assert.equal(untouched[0].id, blob.id);
 });
 
 test('domino geometry filter rejects tiny and oversized objects but accepts a tile', async () => {
