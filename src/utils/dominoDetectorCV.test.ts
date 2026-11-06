@@ -12,6 +12,7 @@ import {
   detectAllPips,
   buildAdaptivePipMask,
   buildYellowPipMask,
+  buildChromaticPipMask,
   buildNeutralDominoBodyMask,
   DetectedPip,
 } from './dominoDetectorCV.ts';
@@ -306,6 +307,34 @@ test('yellow domino body is detected by chroma even when grayscale threshold is 
   drawPip(200, 125); drawPip(200, 175);
   const result = detectDominoesOffline(rgba, w, h);
   assert.ok(result.tiles.length >= 1, 'Yellow domino should be detected');
+});
+
+test('chromatic pip mask detects blue, red and green dots on a light face', () => {
+  const width = 180;
+  const height = 100;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = 245; rgba[i * 4 + 1] = 240; rgba[i * 4 + 2] = 225; rgba[i * 4 + 3] = 255;
+  }
+  const dots = [
+    { cx: 35, cy: 50, color: [35, 125, 190] },
+    { cx: 90, cy: 50, color: [190, 55, 65] },
+    { cx: 145, cy: 50, color: [55, 145, 80] },
+  ];
+  for (const dot of dots) {
+    for (let y = dot.cy - 10; y <= dot.cy + 10; y++) {
+      for (let x = dot.cx - 10; x <= dot.cx + 10; x++) {
+        if ((x - dot.cx) ** 2 + (y - dot.cy) ** 2 > 100) continue;
+        const offset = (y * width + x) * 4;
+        rgba[offset] = dot.color[0]; rgba[offset + 1] = dot.color[1]; rgba[offset + 2] = dot.color[2];
+      }
+    }
+  }
+  const mask = buildChromaticPipMask(rgba, width, height);
+  const active = mask.reduce((sum, value) => sum + value, 0);
+  assert.ok(active > 600 && active < 1100, `expected compact colored pip pixels, got ${active}`);
+  for (const dot of dots) assert.equal(mask[dot.cy * width + dot.cx], 1);
+  assert.equal(mask[10 * width + 10], 0, 'light tile face must not be considered a colored pip');
 });
 
 test('yellow pip chroma mask isolates yellow dots independently from the white tile face', () => {
