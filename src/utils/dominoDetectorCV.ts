@@ -867,6 +867,56 @@ export function buildYellowPipMask(
   return mask;
 }
 
+/** Detects non-neutral pip colours (blue, green, red, purple, yellow, etc.)
+ * independently of luminance. The mask is deliberately component-based: broad
+ * coloured backgrounds are excluded by compact size, near-round shape and
+ * circularity checks. Neutral black/grey pips remain covered by the grayscale
+ * and adaptive masks. */
+export function buildChromaticPipMask(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  if (width <= 0 || height <= 0 || rgbaPixels.length !== width * height * 4) {
+    throw new Error('Invalid RGBA frame dimensions');
+  }
+  const raw = new Uint8Array(width * height);
+  for (let i = 0; i < raw.length; i++) {
+    const offset = i * 4;
+    const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
+    const maximum = Math.max(r, g, b);
+    const minimum = Math.min(r, g, b);
+    const chroma = maximum - minimum;
+    const saturation = maximum > 0 ? chroma / maximum : 0;
+    if (maximum >= 65 && chroma >= 24 && saturation >= 0.20) raw[i] = 1;
+  }
+
+  const frameShort = Math.min(width, height);
+  const minRadius = Math.max(2.5, frameShort * 0.0045);
+  const maxRadius = Math.max(minRadius + 1, frameShort * 0.055);
+  const blobs = findConnectedComponents(
+    raw, width, height,
+    Math.max(4, Math.PI * minRadius * minRadius * 0.38),
+    Math.min(width * height * 0.012, Math.PI * maxRadius * maxRadius * 1.5)
+  );
+  const mask = new Uint8Array(raw.length);
+  for (const blob of blobs) {
+    const blobWidth = blob.maxX - blob.minX + 1;
+    const blobHeight = blob.maxY - blob.minY + 1;
+    const aspect = blobWidth / Math.max(1, blobHeight);
+    const radius = Math.sqrt(blob.area / Math.PI);
+    if (aspect < 0.52 || aspect > 1.92 || radius < minRadius || radius > maxRadius) continue;
+    if (computeCircularity(blob.area, blob.perimeter) < 0.20) continue;
+    for (let y = blob.minY; y <= blob.maxY; y++) {
+      for (let x = blob.minX; x <= blob.maxX; x++) {
+        const index = y * width + x;
+        if (raw[index]) mask[index] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
 /**
  * Separates neutral ivory/white domino faces from coloured backgrounds. Otsu
  * plus a small offset adapts to exposure while retaining the complete tile
@@ -1342,9 +1392,10 @@ export function detectDominoesOffline(
   const classicPips = binarize(gray, pipThreshold, options.invertColors ?? false);
   const adaptivePips = buildAdaptivePipMask(gray, width, height, options.invertColors ?? false);
   const yellowPips = buildYellowPipMask(rgbaPixels, width, height);
+  const chromaticPips = buildChromaticPipMask(rgbaPixels, width, height);
   const binPips = new Uint8Array(gray.length);
   for (let i = 0; i < binPips.length; i++) {
-    binPips[i] = classicPips[i] || adaptivePips[i] || yellowPips[i] ? 1 : 0;
+    binPips[i] = classicPips[i] || adaptivePips[i] || yellowPips[i] || chromaticPips[i] ? 1 : 0;
   }
 
   // 2. Detect neutral ivory/white bodies and add all chromatic yellow surface
