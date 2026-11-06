@@ -677,7 +677,7 @@ export function isPlausibleDominoBox(
     shortSide >= Math.max(20, frameShortSide * 0.06) &&
     longSide >= Math.max(40, frameShortSide * 0.10) &&
     longSide <= frameLongSide * 0.42 &&
-    aspect >= 1.5 && aspect <= 2.75;
+    aspect >= 1.35 && aspect <= 2.75;
 }
 
 /** Yellow hue/chroma mask; works when a yellow tile is not bright enough in grayscale. */
@@ -1117,7 +1117,7 @@ export function detectPipsByRadialVoting(
     }
   }
 
-  let thresholdCount = Math.ceil(edgeCount * 0.82);
+  let thresholdCount = Math.ceil(edgeCount * 0.78);
   let accumulated = 0;
   let edgeThreshold = 0;
   for (let i = 0; i < histogram.length; i++) {
@@ -1129,8 +1129,11 @@ export function detectPipsByRadialVoting(
   }
 
   const shortSide = Math.min(width, height);
-  const minRadius = Math.max(3, Math.round(shortSide * 0.008));
-  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.032));
+  // Reference photos show pip radii around 2–4% of the frame short side.
+  // The wider band recovers pale and glossy dots without counting them as
+  // independent pieces: centres are accepted only inside a confirmed body.
+  const minRadius = Math.max(4, Math.round(shortSide * 0.012));
+  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.046));
   const accumulator = new Uint16Array(gray.length);
 
   for (let y = 2; y < height - 2; y++) {
@@ -1162,8 +1165,8 @@ export function detectPipsByRadialVoting(
     if (accumulator[i] > maximumVotes) maximumVotes = accumulator[i];
   }
   if (maximumVotes < 8) return [];
-  const minVotes = 8;
-  const voteThreshold = Math.max(minVotes, maximumVotes * 0.18);
+  const minVotes = 7;
+  const voteThreshold = Math.max(minVotes, maximumVotes * 0.16);
   const candidates: Array<{ x: number; y: number; votes: number }> = [];
 
   for (let y = 2; y < height - 2; y++) {
@@ -1327,10 +1330,10 @@ export function detectDominoesOffline(
     threshold = computeOtsuThreshold(gray);
   }
 
-  // Circle-gradient detector complements the body and local-contrast paths.
-  // Keep both proposals until the end so a partial Hough grouping cannot hide
-  // valid pieces recovered by the independent body segmentation.
-  const radialTiles = detectDominoesByRadialVoting(rgbaPixels, width, height);
+  // Reuse radial pip centres both as an independent proposal source and
+  // as in-box evidence for body candidates whose pips are pale, glossy or dark.
+  const radialPips = detectPipsByRadialVoting(gray, width, height);
+  const radialTiles = tilesFromRadialPips(radialPips, gray, width, height);
 
   // 1. Detect Pips with both adaptive local contrast and the classic threshold.
   // The adaptive mask retains glossy yellow/grey pips when their luminance is
@@ -1383,8 +1386,27 @@ export function detectDominoesOffline(
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
       const minPipRadius = Math.max(3, Math.min(bw, bh) * 0.04);
       const maxPipRadius = Math.max(minPipRadius + 1, Math.min(40, Math.min(bw, bh) * 0.24));
-      const pipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
-      const pipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
+      const maskPipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
+      const maskPipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
+      const mergeRadialCentres = (
+        maskPips: DetectedPip[],
+        half: { x: number; y: number; width: number; height: number }
+      ): DetectedPip[] => {
+        const combined = [...maskPips];
+        for (const radial of radialPips) {
+          if (radial.radius < minPipRadius * 0.72 || radial.radius > maxPipRadius * 0.95) continue;
+          if (radial.x < half.x || radial.x >= half.x + half.width ||
+              radial.y < half.y || radial.y >= half.y + half.height) continue;
+          const duplicate = combined.some((pip) =>
+            Math.hypot(pip.x - radial.x, pip.y - radial.y) <
+              Math.max(pip.radius, radial.radius) * 1.25
+          );
+          if (!duplicate) combined.push(radial);
+        }
+        return combined;
+      };
+      const pipsA = mergeRadialCentres(maskPipsA, halfA);
+      const pipsB = mergeRadialCentres(maskPipsB, halfB);
 
       const countA = pipsA.length;
       const countB = pipsB.length;
