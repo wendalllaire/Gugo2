@@ -823,6 +823,94 @@ function mergeAdjacentBodyComponents(
   return candidates;
 }
 
+
+/**
+ * Splits a merged, near-square bright component into two physical domino bodies
+ * when a dark seam is visible between them. This targets touching white tiles:
+ * their neutral masks can become one component even though each tile is elongated.
+ */
+export function splitMergedBodyComponents(
+  blobs: ComponentBlob[],
+  gray: Uint8Array,
+  width: number,
+  height: number
+): ComponentBlob[] {
+  const output: ComponentBlob[] = [];
+  for (const blob of blobs) {
+    const x = blob.minX, y = blob.minY;
+    const w = blob.maxX - blob.minX + 1, h = blob.maxY - blob.minY + 1;
+    const shape = Math.max(w, h) / Math.max(1, Math.min(w, h));
+    if (shape < 0.72 || shape > 1.38) {
+      output.push(blob);
+      continue;
+    }
+
+    const verticalSplit = w >= h;
+    const axisLength = verticalSplit ? w : h;
+    const crossLength = verticalSplit ? h : w;
+    const crossStart = Math.floor(crossLength * 0.12);
+    const crossEnd = Math.ceil(crossLength * 0.88);
+    let faceSum = 0, faceCount = 0;
+    for (let c = crossStart; c < crossEnd; c++) {
+      for (let a = 0; a < axisLength; a += Math.max(1, Math.floor(axisLength / 120))) {
+        const px = verticalSplit ? x + a : x + c;
+        const py = verticalSplit ? y + c : y + a;
+        faceSum += gray[py * width + px];
+        faceCount++;
+      }
+    }
+    const faceMean = faceSum / Math.max(1, faceCount);
+    let bestPosition = -1, bestMean = Number.POSITIVE_INFINITY;
+    const minPosition = Math.ceil(axisLength * 0.38);
+    const maxPosition = Math.floor(axisLength * 0.62);
+    for (let pos = minPosition; pos <= maxPosition; pos++) {
+      let sum = 0, count = 0;
+      for (let c = crossStart; c < crossEnd; c++) {
+        const px = verticalSplit ? x + pos : x + c;
+        const py = verticalSplit ? y + c : y + pos;
+        sum += gray[py * width + px];
+        count++;
+      }
+      const mean = sum / Math.max(1, count);
+      if (mean < bestMean) { bestMean = mean; bestPosition = pos; }
+    }
+
+    if (bestPosition < 0 || bestMean >= Math.min(145, faceMean * 0.72)) {
+      output.push(blob);
+      continue;
+    }
+
+    const boxes = verticalSplit
+      ? [
+          { x, y, width: bestPosition, height: h },
+          { x: x + bestPosition + 1, y, width: w - bestPosition - 1, height: h },
+        ]
+      : [
+          { x, y, width: w, height: bestPosition },
+          { x, y: y + bestPosition + 1, width: w, height: h - bestPosition - 1 },
+        ];
+    if (!boxes.every(box => isPlausibleDominoBodyBox(box, width, height))) {
+      output.push(blob);
+      continue;
+    }
+
+    for (let index = 0; index < boxes.length; index++) {
+      const box = boxes[index];
+      const fraction = (box.width * box.height) / Math.max(1, w * h);
+      const area = Math.max(1, Math.round(blob.area * fraction));
+      output.push({
+        id: -(Math.abs(blob.id) * 10 + index + 1),
+        minX: box.x, maxX: box.x + box.width - 1,
+        minY: box.y, maxY: box.y + box.height - 1,
+        area, perimeter: 2 * (box.width + box.height),
+        centroidX: Math.round(box.x + (box.width - 1) / 2),
+        centroidY: Math.round(box.y + (box.height - 1) / 2),
+      });
+    }
+  }
+  return output;
+}
+
 /** Yellow pip mask; only compact, approximately circular yellow components
  * are pips. A solid yellow domino face is intentionally excluded. */
 export function buildYellowPipMask(
@@ -1415,7 +1503,7 @@ export function detectDominoesOffline(
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
-  const mergedBodyBlobs = mergeAdjacentBodyComponents(tileBlobs, width, height);
+  const mergedBodyBlobs = splitMergedBodyComponents(mergeAdjacentBodyComponents(tileBlobs, width, height), gray, width, height);
   const candidateBlobs = mergedBodyBlobs.filter((b) => {
     const bw = b.maxX - b.minX + 1;
     const bh = b.maxY - b.minY + 1;
