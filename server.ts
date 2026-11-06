@@ -101,21 +101,21 @@ app.post('/api/analyze-dominoes', async (req: Request, res: Response): Promise<v
 Analise a imagem da mesa e identifique e CATALOGUE TODAS AS PEÇAS DE DOMINÓ PRESENTES NA FOTO, UMA A UMA.
 
 REGRAS:
-1. Um conjunto Double-12 possui valores de 0 a 12 pips em cada metade ([0|0] até [12|12]).
-2. As peças podem ser brancas/marfim OU amarelas; não exclua uma peça por ser amarela, por reflexos ou sombras.
-3. Os pontos podem ser amarelos, cinzentos/prateados, vermelhos, azuis, roxos, verdes ou pretos. Conte cada ponto circular elevado pelo seu contorno e centro, mesmo quando a cor ou o brilho têm pouco contraste com a peça.
-4. Um reflexo especular dentro de um ponto continua a ser o MESMO ponto: não conte o brilho como um ponto adicional e não descarte pontos cinzentos/amarelos por terem um centro claro.
-5. Catalogue apenas objetos com contorno físico de dominó: retângulo alongado, proporção aproximada 2:1 e duas metades.
-4. NÃO catalogue mãos, dedos, caixas, cartas, pratos, manchas, reflexos, sombras, padrões da mesa ou objetos fora da escala de uma peça.
-5. Retorne cada peça individualmente. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]"; confidence entre 0 e 1. Preserve a orientação da fotografia: sideA é a metade à esquerda (ou acima, se a peça estiver vertical) e sideB é a metade à direita (ou abaixo). Nunca ordene os valores numericamente.
-6. box2d=[ymin,xmin,ymax,xmax] normalizado 0 a 1000 e deve envolver apenas a peça.
-7. Se não houver uma peça fisicamente plausível, devolva pieces vazio. Nunca invente peças para completar a imagem.
-8. 'totalPoints' é a soma exata de todos os pontos.`;
+1. Um conjunto Double-12 contém valores de 0 a 12 pontos em cada metade ([0|0] até [12|12]).
+2. As peças podem ser brancas, marfim, cinzentas ou amarelas. Não exclua uma peça por causa da cor, de reflexos ou de sombras.
+3. Os pontos podem ser pretos, cinzentos/prateados, amarelos, laranja, vermelhos, azuis, roxos ou verdes. Conte cada ponto físico uma única vez, pelo seu contorno circular e posição; um brilho dentro do mesmo ponto não é outro ponto.
+4. Conte os pontos de CADA metade separadamente. Use a disposição regular dos pontos para distinguir 6, 8, 9, 10, 11 e 12; não estime a quantidade pela área escura total.
+5. Catalogue apenas peças físicas: cada uma é um retângulo alongado, aproximadamente 2:1, com duas metades separadas por uma linha central. As peças encostadas continuam a ser peças distintas.
+6. NÃO catalogue mãos, dedos, caixas, cartas, pratos, manchas, reflexos, sombras, padrões da mesa ou objetos fora da escala de uma peça.
+7. Devolva uma entrada por peça, sem fundir peças vizinhas. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]". Preserve a orientação da fotografia: A é esquerda/topo e B é direita/fundo.
+8. box2d=[ymin,xmin,ymax,xmax] normalizado entre 0 e 1000 deve envolver apenas uma peça. Não use uma caixa para duas peças.
+9. Se não existir evidência visual suficiente para uma peça, não invente essa peça. Devolva pieces vazio se não houver peças fiáveis.
+10. totalPoints é a soma exata de todos os pontos de todas as peças devolvidas.`;
 
         // Camera still photos can be larger and take longer to upload/infer.
         // Allow a little more time before falling back to the on-device detector.
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 8000)
+          setTimeout(() => reject(new Error('timeout')), 15000)
         );
 
         const geminiCall = ai.models.generateContent({
@@ -155,7 +155,7 @@ REGRAS:
                         items: { type: Type.INTEGER },
                       },
                     },
-                    required: ['sideA', 'sideB', 'points', 'label'],
+                    required: ['sideA', 'sideB', 'points', 'label', 'box2d'],
                   },
                 },
                 totalPoints: { type: Type.INTEGER },
@@ -202,7 +202,7 @@ REGRAS:
                 shortSide < Math.max(16, minFrameSide * 0.032) ||
                 longSide < Math.max(32, minFrameSide * 0.06) ||
                 longSide > maxFrameSide * 0.55 ||
-                areaFraction < 0.002 || areaFraction > 0.10 ||
+                areaFraction < 0.002 || areaFraction > 0.14 ||
                 aspect < 1.35 || aspect > 2.75 || confidence < 0.55) return [];
 
             return [{
