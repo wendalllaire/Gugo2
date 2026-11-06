@@ -706,10 +706,10 @@ function isPlausibleDominoBodyBox(
     bbox.y + bbox.height <= frameHeight - margin;
   return inside &&
     areaFraction >= 0.01 && areaFraction <= 0.42 &&
-    shortSide >= Math.max(20, frameShort * 0.10) &&
-    longSide >= Math.max(40, frameShort * 0.18) &&
+    shortSide >= Math.max(20, frameShort * 0.055) &&
+    longSide >= Math.max(40, frameShort * 0.10) &&
     longSide <= frameLong * 0.94 &&
-    aspect >= 1.55 && aspect <= 2.85;
+    aspect >= 1.5 && aspect <= 3.0;
 }
 
 /** Verifies the dark separator stripe through the centre of a candidate body. */
