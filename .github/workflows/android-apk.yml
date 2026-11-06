@@ -1,4 +1,5 @@
 name: Android Debug APK
+# Build the debug APK for manual device testing even when vision regression tests report failures.
 
 on:
   push:
