@@ -1468,10 +1468,9 @@ export function detectDominoesOffline(
     threshold = computeOtsuThreshold(gray);
   }
 
-  // Reuse radial pip centres both as an independent proposal source and
-  // as in-box evidence for body candidates whose pips are pale, glossy or dark.
-  const radialPips = detectPipsByRadialVoting(gray, width, height);
-  const radialTiles = tilesFromRadialPips(radialPips, gray, width, height);
+  // Pip centres are counted only inside a physically segmented domino body.
+  // Full-frame radial proposals are intentionally not promoted to tiles: table
+  // grain, shadows and printed patterns can form convincing circular clusters.
 
   // 1. Detect Pips with both adaptive local contrast and the classic threshold.
   // The adaptive mask retains glossy yellow/grey pips when their luminance is
@@ -1527,25 +1526,12 @@ export function detectDominoesOffline(
       const maxPipRadius = Math.max(minPipRadius + 1, Math.min(40, Math.min(bw, bh) * 0.24));
       const maskPipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
       const maskPipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
-      const mergeRadialCentres = (
-        maskPips: DetectedPip[],
-        half: { x: number; y: number; width: number; height: number }
-      ): DetectedPip[] => {
-        const combined = [...maskPips];
-        for (const radial of radialPips) {
-          if (radial.radius < minPipRadius * 0.72 || radial.radius > maxPipRadius * 0.95) continue;
-          if (radial.x < half.x || radial.x >= half.x + half.width ||
-              radial.y < half.y || radial.y >= half.y + half.height) continue;
-          const duplicate = combined.some((pip) =>
-            Math.hypot(pip.x - radial.x, pip.y - radial.y) <
-              Math.max(pip.radius, radial.radius) * 1.25
-          );
-          if (!duplicate) combined.push(radial);
-        }
-        return combined;
-      };
-      const pipsA = mergeRadialCentres(maskPipsA, halfA);
-      const pipsB = mergeRadialCentres(maskPipsB, halfB);
+      // Do not add unconstrained radial-voting centres here. They are useful
+      // as a diagnostic/proposal signal, but on real tabletops they can turn
+      // wood grain or reflections into extra pips. Count mask components only
+      // within the already-confirmed physical half of this domino.
+      const pipsA = maskPipsA;
+      const pipsB = maskPipsB;
 
       const countA = pipsA.length;
       const countB = pipsB.length;
@@ -1579,72 +1565,10 @@ export function detectDominoesOffline(
     });
   }
 
-  // Phase B: Global Pip Spatial Clustering
-  // Detect all pips across the entire image to discover tiles that weren't segmented by tileBlobs
-  // (e.g. low background contrast, tiles touching each other, wood grain table)
-  const allGlobalPips = detectAllPips(binPips, width, height);
+  // Conservative fallback: never invent a domino from a global pip cluster.
+  // If the body mask cannot establish a physical tile, leave it for the user or
+  // the Gemini path rather than returning tabletop texture as a domino.
 
-  if (allGlobalPips.length > 0) {
-    // Filter out pips that are already accounted for by Phase A
-    const unaccountedPips = allGlobalPips.filter((pip) => {
-      return !detectedTiles.some((t) => {
-        const { x, y, width: tw, height: th } = t.bbox;
-        return pip.x >= x && pip.x <= x + tw && pip.y >= y && pip.y <= y + th;
-      });
-    });
-
-    if (unaccountedPips.length > 0) {
-      const clusteredTiles = clusterPipsIntoDominoes(unaccountedPips, width, height);
-      for (const cTile of clusteredTiles) {
-        cTile.id = `tile-cv-${detectedTiles.length + 1}`;
-        detectedTiles.push(cTile);
-      }
-    }
-  }
-
-  // Merge independent detectors by physical-box overlap. Keep the candidate
-  // with the stronger point evidence for each tile; retain non-overlapping
-  // proposals from either path so one incomplete detector cannot suppress pieces.
-  const mergedTiles = [...detectedTiles];
-  const intersectionOverUnion = (
-    a: { x: number; y: number; width: number; height: number },
-    b: { x: number; y: number; width: number; height: number }
-  ) => {
-    const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
-    const x2 = Math.min(a.x + a.width, b.x + b.width);
-    const y2 = Math.min(a.y + a.height, b.y + b.height);
-    const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-    const union = a.width * a.height + b.width * b.height - intersection;
-    return union > 0 ? intersection / union : 0;
-  };
-
-  for (const radial of radialTiles) {
-    let bestIndex = -1;
-    let bestOverlap = 0;
-    for (let i = 0; i < mergedTiles.length; i++) {
-      const overlap = intersectionOverUnion(mergedTiles[i].bbox, radial.bbox);
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap;
-        bestIndex = i;
-      }
-    }
-
-    if (bestIndex < 0 || bestOverlap < 0.28) {
-      mergedTiles.push(radial);
-      continue;
-    }
-
-    const current = mergedTiles[bestIndex];
-    const currentPips = current.halfA.pips.length + current.halfB.pips.length;
-    const radialPips = radial.halfA.pips.length + radial.halfB.pips.length;
-    const currentEvidence = currentPips + current.confidence * 2;
-    const radialEvidence = radialPips + radial.confidence * 2;
-    if (radialEvidence > currentEvidence) mergedTiles[bestIndex] = radial;
-  }
-
-  detectedTiles.splice(0, detectedTiles.length, ...mergedTiles);
-
-  // Sort tiles from highest score to lowest (standard domino cataloging order)
   detectedTiles.sort((a, b) => b.points - a.points);
 
   const pieces: DetectedPiece[] = detectedTiles.map((tile) => ({
