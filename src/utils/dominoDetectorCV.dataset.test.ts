@@ -152,6 +152,19 @@ test('every labeled public/samples image matches the domino values in its filena
   assertNoMismatches('unmodified sample photos', errors);
 });
 
+test('single 0-n sample photos preserve the physical left-to-right side order', () => {
+  for (const name of sampleNames) {
+    const pair = expectedPairsFromFilename(name);
+    assert.equal(pair.length, 1, `Expected one labeled domino in ${name}`);
+    const expectedN = Number(name.match(/0-(\\d{1,2})/)?.[1]);
+    const image = decodeSample(name);
+    const result = detectDominoesOffline(image.data, image.width, image.height);
+    assert.equal(result.pieces.length, 1, `${name}: expected exactly one piece, got ${result.pieces.length}`);
+    assert.equal(result.pieces[0].sideA, 0, `${name}: the blank left half must remain side A`);
+    assert.equal(result.pieces[0].sideB, expectedN, `${name}: the right half must retain its pip count`);
+  }
+});
+
 test('all labeled sample photos keep their gold standard under rotations and color/exposure transforms', () => {
   const samples = [
     { name: referenceImage, expected: referenceExpected },
