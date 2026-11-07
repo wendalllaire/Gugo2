@@ -19,6 +19,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  yolo26-opencv-benchmark:
+    name: Experimental YOLOE-26 + OpenCV benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install YOLOE and OpenCV
+        run: python -m pip install --upgrade ultralytics opencv-python-headless
+
+      - name: Benchmark YOLOE-26 segmentation and OpenCV pip counting
+        run: python scripts/yolo26_opencv_experiment.py --samples public/samples --output artifacts/yolo26-opencv-results.json
+
+      - name: Upload experimental results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolo26-opencv-experiment
+          path: artifacts/yolo26-opencv-results.json
+          if-no-files-found: warn
+          retention-days: 7
+
   build-debug-apk:
     name: Build Android debug APK
     runs-on: ubuntu-latest
