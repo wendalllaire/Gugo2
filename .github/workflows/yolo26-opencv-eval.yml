@@ -51,6 +51,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: '1'
         run: |
+          set -o pipefail
           mkdir -p artifacts/yolo26-opencv
           ARGS=()
           if [ "${{ inputs.include_transforms }}" = "true" ]; then
