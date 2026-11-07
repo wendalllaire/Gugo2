@@ -91,7 +91,8 @@ def get_predictions(model: YOLOE, image: np.ndarray, reference_path: Path,
                                (image.shape[1], image.shape[0]),
                                interpolation=cv2.INTER_LINEAR)
         read = read_from_mask(image, (mask_full > 0.5).astype(np.uint8), float(score))
-        if read is not None and read.side_a + read.side_b > 0:
+        # A visually valid blank tile is a real [0|0] domino; do not discard it.
+        if read is not None:
             candidates.append((read, np.asarray(box, dtype=np.float32)))
 
     # Deduplicate overlapping YOLO masks without fusing adjacent dominoes.
