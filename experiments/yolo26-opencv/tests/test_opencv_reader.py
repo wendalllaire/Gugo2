@@ -2,7 +2,7 @@ import unittest
 import cv2
 import numpy as np
 
-from opencv_reader import count_half_pips, read_rectified_tile
+from opencv_reader import _rectify, count_half_pips, read_rectified_tile
 
 
 class OpenCVReaderTests(unittest.TestCase):
@@ -31,6 +31,24 @@ class OpenCVReaderTests(unittest.TestCase):
         image[:, 328:] = self.make_half(11)[:, 4:]
         result = read_rectified_tile(image)
         self.assertEqual((result.side_a, result.side_b), (7, 11))
+
+    def test_portrait_rectification_keeps_top_half_as_physical_side_a(self):
+        portrait = np.full((640, 316, 3), 242, dtype=np.uint8)
+        portrait[:312] = self.make_half(7)[:312]
+        portrait[312:328] = (15, 15, 15)
+        portrait[328:] = self.make_half(11)[:312]
+        corners = np.array(
+            [[0, 0], [315, 0], [315, 639], [0, 639]], dtype=np.float32
+        )
+        warped = _rectify(portrait, corners)
+        result = read_rectified_tile(warped)
+        self.assertEqual((result.side_a, result.side_b), (7, 11))
+
+    def test_blank_double_zero_tile_is_not_treated_as_missing(self):
+        image = np.full((320, 640, 3), 242, dtype=np.uint8)
+        image[:, 312:328] = (15, 15, 15)
+        result = read_rectified_tile(image)
+        self.assertEqual((result.side_a, result.side_b), (0, 0))
 
 
 if __name__ == "__main__":
