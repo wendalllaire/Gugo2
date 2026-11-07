@@ -224,3 +224,102 @@ test('both full-sequence photos contain exactly the 0-1 through 0-12 set', () =>
   }
   assertNoMismatches('full-sequence sample photos', errors);
 });
+
+
+interface SourceTileBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  value: number;
+}
+
+const isolatedSequenceBoxes: Record<string, { sourceWidth: number; sourceHeight: number; boxes: SourceTileBox[] }> = {
+  'Todas peças v1.jpg': {
+    sourceWidth: 3072,
+    sourceHeight: 4096,
+    boxes: [
+      { x: 517, y: 162, width: 1011, height: 580, value: 1 },
+      { x: 1667, y: 213, width: 977, height: 582, value: 7 },
+      { x: 460, y: 756, width: 1017, height: 557, value: 2 },
+      { x: 1606, y: 838, width: 989, height: 550, value: 8 },
+      { x: 432, y: 1367, width: 1013, height: 535, value: 3 },
+      { x: 1562, y: 1423, width: 989, height: 517, value: 9 },
+      { x: 428, y: 1998, width: 997, height: 495, value: 4 },
+      { x: 1506, y: 2006, width: 986, height: 505, value: 10 },
+      { x: 458, y: 2558, width: 981, height: 515, value: 5 },
+      { x: 1479, y: 2581, width: 973, height: 502, value: 11 },
+      { x: 457, y: 3148, width: 974, height: 512, value: 6 },
+      { x: 1475, y: 3168, width: 953, height: 517, value: 12 },
+    ],
+  },
+  'Todas peças v2.jpg': {
+    sourceWidth: 2461,
+    sourceHeight: 3281,
+    boxes: [
+      { x: 629, y: 366, width: 594, height: 366, value: 1 },
+      { x: 1299, y: 403, width: 583, height: 349, value: 7 },
+      { x: 609, y: 738, width: 589, height: 336, value: 2 },
+      { x: 1266, y: 788, width: 579, height: 324, value: 8 },
+      { x: 604, y: 1104, width: 579, height: 319, value: 3 },
+      { x: 1246, y: 1130, width: 570, height: 305, value: 9 },
+      { x: 606, y: 1474, width: 570, height: 289, value: 4 },
+      { x: 1220, y: 1474, width: 564, height: 288, value: 10 },
+      { x: 627, y: 1805, width: 561, height: 287, value: 5 },
+      { x: 1206, y: 1818, width: 557, height: 275, value: 11 },
+      { x: 621, y: 2151, width: 566, height: 281, value: 6 },
+      { x: 1207, y: 2160, width: 550, height: 284, value: 12 },
+    ],
+  },
+};
+
+function cropTileFromSequence(
+  image: { data: Uint8Array; width: number; height: number },
+  sourceWidth: number,
+  sourceHeight: number,
+  box: SourceTileBox
+) {
+  const scaleX = image.width / sourceWidth;
+  const scaleY = image.height / sourceHeight;
+  const x = Math.max(0, Math.floor(box.x * scaleX));
+  const y = Math.max(0, Math.floor(box.y * scaleY));
+  const width = Math.min(image.width - x, Math.ceil(box.width * scaleX));
+  const height = Math.min(image.height - y, Math.ceil(box.height * scaleY));
+  const padX = Math.max(2, Math.round(width * 0.008));
+  const padY = Math.max(2, Math.round(height * 0.008));
+  const left = Math.max(0, x - padX);
+  const top = Math.max(0, y - padY);
+  const right = Math.min(image.width, x + width + padX);
+  const bottom = Math.min(image.height, y + height + padY);
+  const cropWidth = right - left;
+  const cropHeight = bottom - top;
+  const data = new Uint8Array(cropWidth * cropHeight * 4);
+
+  for (let row = 0; row < cropHeight; row++) {
+    const from = ((top + row) * image.width + left) * 4;
+    data.set(image.data.subarray(from, from + cropWidth * 4), row * cropWidth * 4);
+  }
+
+  return { data, width: cropWidth, height: cropHeight };
+}
+
+test('reverse validation: each tile isolated from v1 and v2 reads as 0-1 through 0-12', () => {
+  const errors: string[] = [];
+
+  for (const name of fullSequenceNames) {
+    const reference = isolatedSequenceBoxes[name];
+    const image = decodeSample(name);
+    assert.equal(reference.boxes.length, 12, `${name}: expected 12 isolated tile regions`);
+
+    for (const box of reference.boxes) {
+      const isolated = cropTileFromSequence(image, reference.sourceWidth, reference.sourceHeight, box);
+      const result = detectDominoesOffline(isolated.data, isolated.width, isolated.height);
+      const actual = result.pieces.map(piece => [piece.sideA, piece.sideB]);
+      if (actual.length !== 1 || actual[0][0] !== 0 || actual[0][1] !== box.value) {
+        errors.push(`${name} isolated 0-${box.value}: expected [0,${box.value}], got ${JSON.stringify(actual)}; crop=${isolated.width}x${isolated.height}`);
+      }
+    }
+  }
+
+  assertNoMismatches('isolated tiles extracted from both full-sequence photos', errors);
+});
