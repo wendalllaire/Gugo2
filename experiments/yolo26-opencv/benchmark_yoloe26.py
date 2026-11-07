@@ -86,8 +86,21 @@ def get_predictions(model: YOLOE, image: np.ndarray, reference_path: Path,
             "cls": np.zeros(len(reference_boxes), dtype=np.int64),
         }
     result = model.predict(**kwargs)[0]
+    raw_predictions = []
+    if result.boxes is not None:
+        raw_boxes = result.boxes.xyxy.detach().cpu().numpy()
+        raw_scores = result.boxes.conf.detach().cpu().numpy().tolist()
+        raw_classes = result.boxes.cls.detach().cpu().numpy().astype(int).tolist()
+        names = result.names
+        for box, score, class_id in zip(raw_boxes, raw_scores, raw_classes):
+            raw_predictions.append({
+                "class_id": class_id,
+                "class_name": names.get(class_id, str(class_id)) if isinstance(names, dict) else str(class_id),
+                "confidence": round(float(score), 4),
+                "bbox": [round(float(v), 1) for v in box],
+            })
     if result.masks is None or result.boxes is None:
-        return []
+        return [], raw_predictions
 
     masks = result.masks.data.detach().cpu().numpy()
     scores = result.boxes.conf.detach().cpu().numpy().tolist()
@@ -122,7 +135,7 @@ def get_predictions(model: YOLOE, image: np.ndarray, reference_path: Path,
     reads = [item[0] for item in keep]
     reads.sort(key=lambda r: ((r.bbox[0] + r.bbox[2]) / 2,
                               (r.bbox[1] + r.bbox[3]) / 2))
-    return reads
+    return reads, raw_predictions
 
 
 def evaluate_pair_list(expected: list[tuple[int, int]],
@@ -193,8 +206,10 @@ def main() -> int:
                      strict_order: bool = False,
                      expected_physical: list[tuple[int, int]] | None = None,
                      annotate: bool = False) -> None:
-        reads = get_predictions(model, image, args.reference_image,
-                                reference_boxes, args.prompt_mode, args.conf, args.imgsz)
+        reads, raw_predictions = get_predictions(
+            model, image, args.reference_image,
+            reference_boxes, args.prompt_mode, args.conf, args.imgsz
+        )
         actual = [(r.side_a, r.side_b) for r in reads]
         result = evaluate_pair_list(expected, actual)
         if strict_order:
@@ -204,6 +219,8 @@ def main() -> int:
         record = {
             "image": path.name,
             "transform": transform,
+            "raw_yolo_detections": len(raw_predictions),
+            "raw_yolo": raw_predictions,
             "tiles_detected": len(reads),
             "pips_total": sum(r.side_a + r.side_b for r in reads),
             "tiles": [
