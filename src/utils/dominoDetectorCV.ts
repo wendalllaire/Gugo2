@@ -759,12 +759,57 @@ function hasDominoDivider(
  * separates the halves completely in the binary body mask. */
 function mergeAdjacentBodyComponents(
   blobs: ComponentBlob[],
+  gray: Uint8Array,
   width: number,
   height: number
 ): ComponentBlob[] {
   const candidates = [...blobs];
   const frameShort = Math.min(width, height);
-  const maxGap = Math.max(8, frameShort * 0.035);
+  // A physical centre bar can be wider than 3.5% of a tightly cropped image.
+  // Permit a wider gap only when the pixels in that gap are dark like a real
+  // divider; nearby unrelated white objects must not be joined.
+  const maxGap = Math.max(8, frameShort * 0.10);
+
+  const hasDarkSeparator = (
+    horizontal: boolean,
+    first: ComponentBlob,
+    second: ComponentBlob,
+    overlapStart: number,
+    overlapEnd: number,
+    gapStart: number,
+    gapEnd: number
+  ): boolean => {
+    if (gapEnd < gapStart) return true;
+    const span = overlapEnd - overlapStart + 1;
+    if (span <= 4) return false;
+    const from = overlapStart + Math.floor(span * 0.12);
+    const to = overlapEnd - Math.floor(span * 0.12);
+    let gapSum = 0, gapCount = 0, faceSum = 0, faceCount = 0;
+    const stride = Math.max(1, Math.floor((to - from + 1) / 100));
+    for (let cross = from; cross <= to; cross += stride) {
+      for (let along = gapStart; along <= gapEnd; along++) {
+        const x = horizontal ? along : cross;
+        const y = horizontal ? cross : along;
+        gapSum += gray[y * width + x];
+        gapCount++;
+      }
+      const firstEdge = horizontal
+        ? (first.maxX < second.minX ? first.maxX : second.maxX)
+        : (first.maxY < second.minY ? first.maxY : second.maxY);
+      const secondEdge = horizontal
+        ? (first.maxX < second.minX ? second.minX : first.minX)
+        : (first.maxY < second.minY ? second.minY : first.minY);
+      const x1 = horizontal ? firstEdge : cross;
+      const y1 = horizontal ? cross : firstEdge;
+      const x2 = horizontal ? secondEdge : cross;
+      const y2 = horizontal ? cross : secondEdge;
+      faceSum += gray[y1 * width + x1] + gray[y2 * width + x2];
+      faceCount += 2;
+    }
+    const gapMean = gapSum / Math.max(1, gapCount);
+    const faceMean = faceSum / Math.max(1, faceCount);
+    return gapMean < Math.min(145, faceMean * 0.72);
+  };
 
   for (let i = 0; i < blobs.length; i++) {
     const a = blobs[i];
@@ -786,10 +831,21 @@ function mergeAdjacentBodyComponents(
       const gapY = Math.max(0, Math.max(a.minY, b.minY) - Math.min(a.maxY, b.maxY) - 1);
       const sameHeight = Math.min(ah, bh) / Math.max(ah, bh) >= 0.68;
       const sameWidth = Math.min(aw, bw) / Math.max(aw, bw) >= 0.68;
-      const horizontalPair = sameHeight &&
-        overlapY / Math.max(1, Math.min(ah, bh)) >= 0.72 && gapX <= maxGap;
-      const verticalPair = sameWidth &&
-        overlapX / Math.max(1, Math.min(aw, bw)) >= 0.72 && gapY <= maxGap;
+      const localGapLimit = Math.min(maxGap, Math.min(aw, ah, bw, bh) * 0.16);
+      const horizontalGeometry = sameHeight &&
+        overlapY / Math.max(1, Math.min(ah, bh)) >= 0.72 && gapX <= localGapLimit;
+      const verticalGeometry = sameWidth &&
+        overlapX / Math.max(1, Math.min(aw, bw)) >= 0.72 && gapY <= localGapLimit;
+      const horizontalPair = horizontalGeometry && hasDarkSeparator(
+        true, a, b, Math.max(a.minY, b.minY), Math.min(a.maxY, b.maxY),
+        Math.min(a.maxX, b.maxX) === a.maxX ? a.maxX + 1 : b.maxX + 1,
+        Math.max(a.minX, b.minX) - 1
+      );
+      const verticalPair = verticalGeometry && hasDarkSeparator(
+        false, a, b, Math.max(a.minX, b.minX), Math.min(a.maxX, b.maxX),
+        Math.min(a.maxY, b.maxY) === a.maxY ? a.maxY + 1 : b.maxY + 1,
+        Math.max(a.minY, b.minY) - 1
+      );
       if (!horizontalPair && !verticalPair) continue;
 
       const bbox = {
@@ -1641,7 +1697,7 @@ export function detectDominoesOffline(
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
   // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
-  const mergedBodyBlobs = splitMergedBodyComponents(mergeAdjacentBodyComponents(tileBlobs, width, height), gray, width, height);
+  const mergedBodyBlobs = splitMergedBodyComponents(mergeAdjacentBodyComponents(tileBlobs, gray, width, height), gray, width, height);
   const candidateBlobs = mergedBodyBlobs.filter((b) => {
     const bw = b.maxX - b.minX + 1;
     const bh = b.maxY - b.minY + 1;
