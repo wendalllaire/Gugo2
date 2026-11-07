@@ -160,9 +160,10 @@ def main() -> int:
                         default=[40, 155, 515, 400], metavar=("X1", "Y1", "X2", "Y2"))
     parser.add_argument("--prompt-mode", choices=["visual-single", "visual-multi", "text-domino"],
                         default="visual-multi")
+    parser.add_argument("--text-class", default="domino")
     parser.add_argument("--output", type=Path, default=Path("artifacts/yolo26-opencv"))
     parser.add_argument("--model", default="yoloe-26s-seg.pt")
-    parser.add_argument("--conf", type=float, default=0.12)
+    parser.add_argument("--conf", type=float, default=0.05)
     parser.add_argument("--imgsz", type=int, default=960)
     parser.add_argument("--include-transforms", action="store_true")
     args = parser.parse_args()
@@ -186,7 +187,7 @@ def main() -> int:
 
     model = YOLOE(args.model)
     if args.prompt_mode == "text-domino":
-        model.set_classes(["domino tile"])
+        model.set_classes([args.text_class])
     paths = []
     for path in sorted(args.samples.glob("*.jpg")):
         name = path.name
@@ -278,7 +279,7 @@ def main() -> int:
         "engine": "YOLOE-26 instance segmentation + OpenCV rectification, components and Hough circles",
         "prompt": {"mode": args.prompt_mode, "reference": args.reference_image.name,
                    "reference_boxes_xyxy": reference_boxes,
-                   "text_classes": ["domino tile"] if args.prompt_mode == "text-domino" else []},
+                   "text_classes": [args.text_class] if args.prompt_mode == "text-domino" else []},
         "images_tested": len(records),
         "images_passed": passed,
         "images_failed": len(records) - passed,
