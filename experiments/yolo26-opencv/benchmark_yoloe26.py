@@ -151,9 +151,14 @@ def main() -> int:
     model = YOLOE(args.model)
     paths = []
     for path in sorted(args.samples.glob("*.jpg")):
-        if (expected_from_name(path.name) or
-                path.name == "IMG_20261102_231406.jpg" or
-                path.name.startswith("Todas peças v")):
+        name = path.name
+        # Match the exact labelled-sample naming convention. In particular,
+        # exclude Stagnation Lab screenshots and annotated reference images:
+        # their timestamps contain number pairs that look like domino labels.
+        labelled_sample = re.match(r"^\\d{1,2}-\\d{1,2}(?:\\s|\\.jpe?g$)", name, re.IGNORECASE)
+        is_reference = name == "IMG_20261102_231406.jpg"
+        is_sequence = re.fullmatch(r"Todas peças v[12]\\.jpg", name, re.IGNORECASE)
+        if labelled_sample or is_reference or is_sequence:
             paths.append(path)
 
     records = []
