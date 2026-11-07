@@ -285,19 +285,27 @@ function cropTileFromSequence(
   const y = Math.max(0, Math.floor(box.y * scaleY));
   const width = Math.min(image.width - x, Math.ceil(box.width * scaleX));
   const height = Math.min(image.height - y, Math.ceil(box.height * scaleY));
-  const padX = Math.max(2, Math.round(width * 0.008));
-  const padY = Math.max(2, Math.round(height * 0.008));
-  const left = Math.max(0, x - padX);
-  const top = Math.max(0, y - padY);
-  const right = Math.min(image.width, x + width + padX);
-  const bottom = Math.min(image.height, y + height + padY);
-  const cropWidth = right - left;
-  const cropHeight = bottom - top;
+  // Keep neighbouring tiles out of the isolated sample, but restore a dark
+  // contrasting surround so Otsu/body segmentation sees the complete tile.
+  const padX = Math.max(12, Math.round(width * 0.12));
+  const padY = Math.max(12, Math.round(height * 0.12));
+  const cropWidth = width + padX * 2;
+  const cropHeight = height + padY * 2;
+  const background = [image.data[0], image.data[1], image.data[2], 255];
   const data = new Uint8Array(cropWidth * cropHeight * 4);
 
-  for (let row = 0; row < cropHeight; row++) {
-    const from = ((top + row) * image.width + left) * 4;
-    data.set(image.data.subarray(from, from + cropWidth * 4), row * cropWidth * 4);
+  for (let i = 0; i < cropWidth * cropHeight; i++) {
+    const offset = i * 4;
+    data[offset] = background[0];
+    data[offset + 1] = background[1];
+    data[offset + 2] = background[2];
+    data[offset + 3] = 255;
+  }
+
+  for (let row = 0; row < height; row++) {
+    const from = ((y + row) * image.width + x) * 4;
+    const target = ((padY + row) * cropWidth + padX) * 4;
+    data.set(image.data.subarray(from, from + width * 4), target);
   }
 
   return { data, width: cropWidth, height: cropHeight };
