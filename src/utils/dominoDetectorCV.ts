@@ -1023,23 +1023,94 @@ export function detectColorRegionsInHalf(
       x < 0 || y < 0 || width <= 4 || height <= 4 ||
       x + width > fullWidth || y + height > fullHeight) return [];
 
-  const raw = new Uint8Array(width * height);
-  for (let py = 0; py < height; py++) {
-    for (let px = 0; px < width; px++) {
+  // Calibrate against the dominant face colour inside this physical half.
+  // This captures every pip family (blue/green/red/yellow/orange/purple and
+  // neutral grey/black) without assigning a fixed hue to a domino value.
+  const histograms = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  const sampleX0 = Math.floor(width * 0.10);
+  const sampleX1 = Math.ceil(width * 0.90);
+  const sampleY0 = Math.floor(height * 0.10);
+  const sampleY1 = Math.ceil(height * 0.90);
+  let sampleCount = 0;
+
+  for (let py = sampleY0; py < sampleY1; py++) {
+    for (let px = sampleX0; px < sampleX1; px++) {
       const offset = ((y + py) * fullWidth + x + px) * 4;
-      const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
-      const maximum = Math.max(r, g, b);
-      const minimum = Math.min(r, g, b);
-      const chroma = maximum - minimum;
-      const saturation = maximum > 0 ? chroma / maximum : 0;
-      // Ignore low-saturation ivory/grey face pixels; include coloured ink
-      // even when its luminance is close to the tile surface.
-      if (maximum >= 55 && chroma >= 22 && saturation >= 0.18) raw[py * width + px] = 1;
+      histograms[0][rgbaPixels[offset]]++;
+      histograms[1][rgbaPixels[offset + 1]]++;
+      histograms[2][rgbaPixels[offset + 2]]++;
+      sampleCount++;
     }
   }
 
-  const minArea = Math.max(4, width * height * 0.000035);
-  const maxArea = Math.max(minArea + 1, Math.min(width * height * 0.05, Math.min(width, height) ** 2 * 0.12));
+  const medianChannel = (histogram: Uint32Array): number => {
+    const target = Math.floor(sampleCount / 2);
+    let accumulated = 0;
+    for (let value = 0; value < histogram.length; value++) {
+      accumulated += histogram[value];
+      if (accumulated > target) return value;
+    }
+    return 128;
+  };
+  const face = [medianChannel(histograms[0]), medianChannel(histograms[1]), medianChannel(histograms[2])];
+
+  // Estimate normal face texture/noise with a small distance histogram.
+  // The lower bound keeps pale coloured pips visible; the adaptive term avoids
+  // turning grain or uneven illumination into hundreds of candidate regions.
+  const distances = new Uint8Array(width * height);
+  const distanceHistogram = new Uint32Array(256);
+  for (let py = sampleY0; py < sampleY1; py++) {
+    for (let px = sampleX0; px < sampleX1; px++) {
+      const offset = ((y + py) * fullWidth + x + px) * 4;
+      const dr = rgbaPixels[offset] - face[0];
+      const dg = rgbaPixels[offset + 1] - face[1];
+      const db = rgbaPixels[offset + 2] - face[2];
+      const distance = Math.min(255, Math.round(Math.sqrt(dr * dr + dg * dg + db * db)));
+      distanceHistogram[distance]++;
+    }
+  }
+
+  const medianDistance = (() => {
+    const target = Math.floor(sampleCount / 2);
+    let accumulated = 0;
+    for (let value = 0; value < distanceHistogram.length; value++) {
+      accumulated += distanceHistogram[value];
+      if (accumulated > target) return value;
+    }
+    return 0;
+  })();
+  const deviationHistogram = new Uint32Array(256);
+  for (let distance = 0; distance < distanceHistogram.length; distance++) {
+    deviationHistogram[Math.abs(distance - medianDistance)] += distanceHistogram[distance];
+  }
+  const noiseDeviation = (() => {
+    const target = Math.floor(sampleCount * 0.75);
+    let accumulated = 0;
+    for (let value = 0; value < deviationHistogram.length; value++) {
+      accumulated += deviationHistogram[value];
+      if (accumulated > target) return value;
+    }
+    return 0;
+  })();
+  const colourDistanceThreshold = Math.max(34, medianDistance + noiseDeviation * 2.5);
+
+  const raw = new Uint8Array(width * height);
+  const marginX = Math.max(2, Math.round(width * 0.035));
+  const marginY = Math.max(2, Math.round(height * 0.035));
+  for (let py = marginY; py < height - marginY; py++) {
+    for (let px = marginX; px < width - marginX; px++) {
+      const offset = ((y + py) * fullWidth + x + px) * 4;
+      const dr = rgbaPixels[offset] - face[0];
+      const dg = rgbaPixels[offset + 1] - face[1];
+      const db = rgbaPixels[offset + 2] - face[2];
+      if (Math.sqrt(dr * dr + dg * dg + db * db) >= colourDistanceThreshold) {
+        raw[py * width + px] = 1;
+      }
+    }
+  }
+
+  const minArea = Math.max(5, width * height * 0.00006);
+  const maxArea = Math.max(minArea + 1, Math.min(width * height * 0.045, Math.min(width, height) ** 2 * 0.10));
   const blobs = findConnectedComponents(raw, width, height, minArea, maxArea);
   const minDimension = Math.min(width, height);
   const maxRegionDimension = Math.max(5, minDimension * 0.30);
@@ -1050,7 +1121,7 @@ export function detectColorRegionsInHalf(
     const regionHeight = blob.maxY - blob.minY + 1;
     if (Math.max(regionWidth, regionHeight) > maxRegionDimension) continue;
     const aspect = regionWidth / Math.max(1, regionHeight);
-    if (aspect < 0.32 || aspect > 3.1) continue;
+    if (aspect < 0.38 || aspect > 2.65) continue;
     const radius = Math.max(2, Math.sqrt(blob.area / Math.PI));
     candidates.push({
       x: x + blob.centroidX,
@@ -1061,7 +1132,6 @@ export function detectColorRegionsInHalf(
     });
   }
 
-  // Nearby masks can fragment one printed mark; merge duplicate centres.
   const unique: DetectedPip[] = [];
   for (const candidate of candidates) {
     const duplicate = unique.find(other =>
