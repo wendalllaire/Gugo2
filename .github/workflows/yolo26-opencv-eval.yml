@@ -30,8 +30,11 @@ jobs:
           cache: pip
           cache-dependency-path: experiments/yolo26-opencv/requirements.txt
 
+      - name: Install CPU-only PyTorch
+        run: python -m pip install --upgrade pip && python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
       - name: Install YOLOE-26 and OpenCV
-        run: python -m pip install --upgrade pip && python -m pip install -r experiments/yolo26-opencv/requirements.txt
+        run: python -m pip install -r experiments/yolo26-opencv/requirements.txt
 
       - name: Test OpenCV reader with synthetic glossy pips and A/B order
         env:
