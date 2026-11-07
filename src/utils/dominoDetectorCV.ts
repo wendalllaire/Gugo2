@@ -1522,7 +1522,7 @@ export function detectDominoesOffline(
       const bbox = { x: blob.minX, y: blob.minY, width: bw, height: bh };
 
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
-      const minPipRadius = Math.max(2.5, Math.min(bw, bh) * 0.025);
+      const minPipRadius = Math.max(3, Math.min(bw, bh) * 0.04);
       const maxPipRadius = Math.max(minPipRadius + 1, Math.min(40, Math.min(bw, bh) * 0.24));
       const maskPipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
       const maskPipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
