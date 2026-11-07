@@ -1005,6 +1005,75 @@ export function buildChromaticPipMask(
   return mask;
 }
 
+
+/**
+ * Counts compact chromatic regions inside one physical domino half without
+ * requiring a circular pip silhouette. This is an independent colour signal:
+ * hue/saturation separates coloured marks from the ivory face, while component
+ * area and scale reject large coloured surfaces and isolated sensor noise.
+ */
+export function detectColorRegionsInHalf(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  fullWidth: number,
+  fullHeight: number,
+  halfBbox: { x: number; y: number; width: number; height: number }
+): DetectedPip[] {
+  const { x, y, width, height } = halfBbox;
+  if (fullWidth <= 0 || fullHeight <= 0 || rgbaPixels.length !== fullWidth * fullHeight * 4 ||
+      x < 0 || y < 0 || width <= 4 || height <= 4 ||
+      x + width > fullWidth || y + height > fullHeight) return [];
+
+  const raw = new Uint8Array(width * height);
+  for (let py = 0; py < height; py++) {
+    for (let px = 0; px < width; px++) {
+      const offset = ((y + py) * fullWidth + x + px) * 4;
+      const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
+      const maximum = Math.max(r, g, b);
+      const minimum = Math.min(r, g, b);
+      const chroma = maximum - minimum;
+      const saturation = maximum > 0 ? chroma / maximum : 0;
+      // Ignore low-saturation ivory/grey face pixels; include coloured ink
+      // even when its luminance is close to the tile surface.
+      if (maximum >= 55 && chroma >= 22 && saturation >= 0.18) raw[py * width + px] = 1;
+    }
+  }
+
+  const minArea = Math.max(4, width * height * 0.000035);
+  const maxArea = Math.max(minArea + 1, Math.min(width * height * 0.018, width * height * 0.004));
+  const blobs = findConnectedComponents(raw, width, height, minArea, maxArea);
+  const minDimension = Math.min(width, height);
+  const maxRegionDimension = Math.max(5, minDimension * 0.30);
+  const candidates: DetectedPip[] = [];
+
+  for (const blob of blobs) {
+    const regionWidth = blob.maxX - blob.minX + 1;
+    const regionHeight = blob.maxY - blob.minY + 1;
+    if (Math.max(regionWidth, regionHeight) > maxRegionDimension) continue;
+    const aspect = regionWidth / Math.max(1, regionHeight);
+    if (aspect < 0.32 || aspect > 3.1) continue;
+    const radius = Math.max(2, Math.sqrt(blob.area / Math.PI));
+    candidates.push({
+      x: x + blob.centroidX,
+      y: y + blob.centroidY,
+      radius: Math.round(radius),
+      area: blob.area,
+      circularity: computeCircularity(blob.area, blob.perimeter),
+    });
+  }
+
+  // Nearby masks can fragment one printed mark; merge duplicate centres.
+  const unique: DetectedPip[] = [];
+  for (const candidate of candidates) {
+    const duplicate = unique.find(other =>
+      Math.hypot(candidate.x - other.x, candidate.y - other.y) <
+      Math.max(3, Math.min(candidate.radius, other.radius) * 0.8)
+    );
+    if (!duplicate) unique.push(candidate);
+    else if (candidate.area > duplicate.area) Object.assign(duplicate, candidate);
+  }
+  return unique.slice(0, 12);
+}
+
 /**
  * Separates neutral ivory/white domino faces from coloured backgrounds. Otsu
  * plus a small offset adapts to exposure while retaining the complete tile
@@ -1526,12 +1595,25 @@ export function detectDominoesOffline(
       const maxPipRadius = Math.max(minPipRadius + 1, Math.min(40, Math.min(bw, bh) * 0.24));
       const maskPipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
       const maskPipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
-      // Do not add unconstrained radial-voting centres here. They are useful
-      // as a diagnostic/proposal signal, but on real tabletops they can turn
-      // wood grain or reflections into extra pips. Count mask components only
-      // within the already-confirmed physical half of this domino.
-      const pipsA = maskPipsA;
-      const pipsB = maskPipsB;
+      // Independent chroma pass: coloured marks are counted by their colour
+      // regions even when glare/printing makes their silhouette non-circular.
+      // Only regions inside the confirmed physical half are eligible.
+      const colorRegionsA = detectColorRegionsInHalf(rgbaPixels, width, height, halfA);
+      const colorRegionsB = detectColorRegionsInHalf(rgbaPixels, width, height, halfB);
+      const mergeSignals = (shape: DetectedPip[], color: DetectedPip[]) => {
+        const merged = [...shape];
+        for (const region of color) {
+          if (!merged.some(pip =>
+            Math.hypot(pip.x - region.x, pip.y - region.y) <
+            Math.max(4, Math.min(pip.radius, region.radius) * 1.25)
+          )) merged.push(region);
+        }
+        return merged.slice(0, 12);
+      };
+      // Neutral pips continue to come from luminance/local contrast; coloured
+      // pips gain a second route based on RGB chroma, not circle geometry alone.
+      const pipsA = mergeSignals(maskPipsA, colorRegionsA);
+      const pipsB = mergeSignals(maskPipsB, colorRegionsB);
 
       const countA = pipsA.length;
       const countB = pipsB.length;
