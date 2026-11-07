@@ -59,8 +59,9 @@ jobs:
           fi
           python experiments/yolo26-opencv/benchmark_yoloe26.py \
             --samples public/samples \
-            --reference-image public/samples/0-10.jpg \
+            --reference-image public/samples/IMG_20261102_231406.jpg \
             --reference-box 40 155 515 400 \
+            --prompt-mode visual-multi \
             "${ARGS[@]}" \
             --output artifacts/yolo26-opencv 2>&1 | tee artifacts/yolo26-opencv/benchmark.log
 
