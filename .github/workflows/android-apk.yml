@@ -53,7 +53,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: domino-vision-golden-samples
-          path: public/samples/*.jpg
+          # Keep illustrative Stagnation Lab/UI screenshots out of the gold-standard QA bundle.
+          path: |
+            public/samples/[0-9]*.jpg
+            public/samples/Todas peças v*.jpg
           if-no-files-found: error
           retention-days: 7
 
