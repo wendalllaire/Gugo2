@@ -8,8 +8,12 @@ import { detectDominoesOffline } from './dominoDetectorCV.ts';
 const sampleDirectory = path.resolve('public/samples');
 const referenceImage = 'IMG_20261102_231406.jpg';
 const referenceExpected = ['1-11', '4-6', '7-11'];
+// Only photographs explicitly named with domino values belong to the gold-standard
+// dataset. Stagnation Lab screenshots and annotated/green-confirmed UI references
+// are illustrative material, not recognition ground truth, and must never be parsed
+// for expected domino values (their dates contain misleading number pairs).
 const sampleNames = fs.readdirSync(sampleDirectory)
-  .filter((name) => /\d{1,2}-\d{1,2}/.test(name) && /\.jpe?g$/i.test(name))
+  .filter((name) => /^\d{1,2}-\d{1,2}(?:\s|\.jpe?g$)/i.test(name))
   .sort();
 
 function normalizePair(a: number, b: number): string {
