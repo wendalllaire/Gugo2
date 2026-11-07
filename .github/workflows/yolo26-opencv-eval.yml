@@ -1,0 +1,60 @@
+name: YOLOE-26 + OpenCV evaluation
+
+on:
+  push:
+    branches:
+      - experiment/yolo26-opencv
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yolo26-opencv-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate-yolo26:
+    name: Evaluate YOLOE-26 with OpenCV
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: experiments/yolo26-opencv/requirements.txt
+
+      - name: Install YOLOE-26 and OpenCV
+        run: python -m pip install --upgrade pip && python -m pip install -r experiments/yolo26-opencv/requirements.txt
+
+      - name: Test OpenCV reader with synthetic glossy pips and A/B order
+        env:
+          PYTHONPATH: experiments/yolo26-opencv
+        run: python -m unittest discover -s experiments/yolo26-opencv/tests -v
+
+      - name: Run full YOLOE-26 vision regression benchmark
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: |
+          mkdir -p artifacts/yolo26-opencv
+          python experiments/yolo26-opencv/benchmark_yoloe26.py \
+            --samples public/samples \
+            --reference-image public/samples/0-10.jpg \
+            --reference-box 40 155 515 400 \
+            --include-transforms \
+            --output artifacts/yolo26-opencv 2>&1 | tee artifacts/yolo26-opencv/benchmark.log
+
+      - name: Upload YOLOE-26 benchmark results and annotated samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolo26-opencv-evaluation
+          path: artifacts/yolo26-opencv/
+          if-no-files-found: warn
+          retention-days: 14
