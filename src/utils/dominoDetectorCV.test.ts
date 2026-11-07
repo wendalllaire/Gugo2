@@ -16,6 +16,7 @@ import {
   detectColorRegionsInHalf,
   buildNeutralDominoBodyMask,
   splitMergedBodyComponents,
+  mergeAdjacentBodyComponents,
   DetectedPip,
 } from './dominoDetectorCV.ts';
 
@@ -416,6 +417,32 @@ test('neutral domino body mask survives dim exposure and rejects warm tabletop p
     'warm background pixels must not expand the detected tile bounds');
 });
 
+
+test('merge separated domino halves only across a dark physical divider', () => {
+  const width = 500, height = 300;
+  const gray = new Uint8Array(width * height);
+  gray.fill(225);
+  const makeBlob = (id: number, minX: number, maxX: number) => ({
+    id, minX, maxX, minY: 80, maxY: 199,
+    area: (maxX - minX + 1) * 120, perimeter: 2 * ((maxX - minX + 1) + 120),
+    centroidX: Math.round((minX + maxX) / 2), centroidY: 139,
+  });
+  const left = makeBlob(1, 90, 209);
+  const right = makeBlob(2, 226, 345);
+  // A 16px black divider gap, wider than the old fixed 3.5% frame threshold.
+  for (let y = 80; y <= 199; y++) for (let x = 210; x <= 225; x++) {
+    gray[y * width + x] = 18;
+  }
+  const merged = mergeAdjacentBodyComponents([left, right], gray, width, height);
+  assert.equal(merged.length, 3, 'two half-face components should produce one combined domino candidate');
+  assert.ok(merged.some(blob => blob.minX === 90 && blob.maxX === 345),
+    'combined physical body must span both halves in left-to-right order');
+
+  const brightGap = new Uint8Array(width * height);
+  brightGap.fill(225);
+  const rejected = mergeAdjacentBodyComponents([left, right], brightGap, width, height);
+  assert.equal(rejected.length, 2, 'nearby bright objects without a dark divider must not be merged');
+});
 
 test('split merged touching white domino bodies only when a dark seam supports it', () => {
   const width = 400, height = 400;
