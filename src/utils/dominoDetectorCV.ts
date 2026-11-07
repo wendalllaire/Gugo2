@@ -134,6 +134,60 @@ export function binarize(
   return bin;
 }
 
+/**
+ * Builds a local-contrast pip mask. A global grayscale threshold misses glossy
+ * grey/yellow pips whenever exposure or reflected light lifts their luminance.
+ * The local mean is computed with an integral image so the same detector works
+ * at camera-preview and full-photo resolutions.
+ */
+export function buildAdaptivePipMask(
+  gray: Uint8Array,
+  width: number,
+  height: number,
+  invert = false
+): Uint8Array {
+  if (width <= 0 || height <= 0 || gray.length !== width * height) {
+    throw new Error('Invalid grayscale frame dimensions');
+  }
+
+  const stride = width + 1;
+  const integral = new Float64Array((width + 1) * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      rowSum += gray[y * width + x];
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
+
+  const radius = Math.max(4, Math.min(14, Math.round(Math.min(width, height) * 0.018)));
+  const mask = new Uint8Array(gray.length);
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(height, y + radius + 1);
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width, x + radius + 1);
+      const localSum =
+        integral[y1 * stride + x1] -
+        integral[y0 * stride + x1] -
+        integral[y1 * stride + x0] +
+        integral[y0 * stride + x0];
+      const localMean = localSum / ((x1 - x0) * (y1 - y0));
+      const value = gray[y * width + x];
+      const contrast = invert ? value - localMean : localMean - value;
+      const requiredContrast = Math.max(10, localMean * 0.045);
+
+      // Requiring a reasonably bright local neighbourhood confines detections
+      // to tile faces and avoids turning dark felt texture into domino pips.
+      if (localMean >= 105 && value <= 248 && contrast >= requiredContrast) {
+        mask[y * width + x] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
 export interface ComponentBlob {
   id: number;
   minX: number;
@@ -535,7 +589,9 @@ export function clusterPipsIntoDominoes(
     }
 
     for (const sub of subClusters) {
-      if (sub.length === 0) continue;
+      // An isolated speck is insufficient evidence. Phase A still detects
+      // genuine [0|1] and blank tiles from their physical body.
+      if (sub.length < 3) continue;
 
       const sMinX = Math.min(...sub.map((p) => p.x));
       const sMaxX = Math.max(...sub.map((p) => p.x));
@@ -552,6 +608,7 @@ export function clusterPipsIntoDominoes(
 
       const orientation: 'vertical' | 'horizontal' = bboxH >= bboxW ? 'vertical' : 'horizontal';
       const bbox = { x: bboxX, y: bboxY, width: bboxW, height: bboxH };
+      if (!isPlausibleDominoBox(bbox, imgWidth, imgHeight)) continue;
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
 
       // Separate pips into halfA and halfB
@@ -571,8 +628,9 @@ export function clusterPipsIntoDominoes(
       // Constrain to maximum 12 pips per half for Mexican Train Double-12
       const countA = Math.min(12, pipsA.length);
       const countB = Math.min(12, pipsB.length);
-      const sideA = Math.min(countA, countB);
-      const sideB = Math.max(countA, countB);
+      // Preserve physical orientation: A is left/top, B is right/bottom.
+      const sideA = countA;
+      const sideB = countB;
 
       tiles.push({
         id: `tile-cluster-${tileCounter++}`,
@@ -592,11 +650,1001 @@ export function clusterPipsIntoDominoes(
   return tiles;
 }
 
+
+/** Scale and shape gate for a physical Double-12 domino, relative to the frame. */
+export function isPlausibleDominoBox(
+  bbox: { x: number; y: number; width: number; height: number },
+  frameWidth: number,
+  frameHeight: number
+): boolean {
+  if (frameWidth <= 0 || frameHeight <= 0 || bbox.width <= 0 || bbox.height <= 0) return false;
+  const areaFraction = (bbox.width * bbox.height) / (frameWidth * frameHeight);
+  const shortSide = Math.min(bbox.width, bbox.height);
+  const longSide = Math.max(bbox.width, bbox.height);
+  const aspect = longSide / shortSide;
+  const frameShortSide = Math.min(frameWidth, frameHeight);
+  const frameLongSide = Math.max(frameWidth, frameHeight);
+  // A real domino occupies a substantial, elongated footprint. Reject
+  // tiny reflected objects and any candidate clipped by the frame edge.
+  const frameMargin = Math.max(2, frameShortSide * 0.006);
+  const staysInsideFrame =
+    bbox.x >= frameMargin &&
+    bbox.y >= frameMargin &&
+    bbox.x + bbox.width <= frameWidth - frameMargin &&
+    bbox.y + bbox.height <= frameHeight - frameMargin;
+  return staysInsideFrame &&
+    areaFraction >= 0.002 && areaFraction <= 0.07 &&
+    shortSide >= Math.max(20, frameShortSide * 0.06) &&
+    longSide >= Math.max(40, frameShortSide * 0.10) &&
+    longSide <= frameLongSide * 0.42 &&
+    aspect >= 1.35 && aspect <= 2.75;
+}
+
+/** Yellow hue/chroma mask; works when a yellow tile is not bright enough in grayscale. */
+export function isYellowTilePixel(r: number, g: number, b: number): boolean {
+  return r >= 75 && g >= 65 && b <= Math.min(r, g) * 0.84 &&
+    r - b >= 25 && g - b >= 18 && g >= r * 0.45 && r >= g * 0.82;
+}
+
+/** Geometry gate for a body-segmented tile. Larger close-up pieces are allowed
+ * only on this path; pip-only proposals continue to use the stricter gate above. */
+function isPlausibleDominoBodyBox(
+  bbox: { x: number; y: number; width: number; height: number },
+  frameWidth: number,
+  frameHeight: number
+): boolean {
+  if (frameWidth <= 0 || frameHeight <= 0 || bbox.width <= 0 || bbox.height <= 0) return false;
+  const frameShort = Math.min(frameWidth, frameHeight);
+  const frameLong = Math.max(frameWidth, frameHeight);
+  const shortSide = Math.min(bbox.width, bbox.height);
+  const longSide = Math.max(bbox.width, bbox.height);
+  const areaFraction = (bbox.width * bbox.height) / (frameWidth * frameHeight);
+  const aspect = longSide / shortSide;
+  const margin = Math.max(2, frameShort * 0.006);
+  const inside = bbox.x >= margin && bbox.y >= margin &&
+    bbox.x + bbox.width <= frameWidth - margin &&
+    bbox.y + bbox.height <= frameHeight - margin;
+  return inside &&
+    areaFraction >= 0.01 && areaFraction <= 0.48 &&
+    shortSide >= Math.max(20, frameShort * 0.055) &&
+    longSide >= Math.max(40, frameShort * 0.10) &&
+    longSide <= frameLong * 0.94 &&
+    aspect >= 1.5 && aspect <= 3.0;
+}
+
+/** Verifies the dark separator stripe through the centre of a candidate body. */
+function hasDominoDivider(
+  gray: Uint8Array,
+  frameWidth: number,
+  frameHeight: number,
+  bbox: { x: number; y: number; width: number; height: number },
+  orientation: 'vertical' | 'horizontal'
+): boolean {
+  const x0 = Math.max(0, Math.floor(bbox.x + bbox.width * 0.12));
+  const x1 = Math.min(frameWidth - 1, Math.ceil(bbox.x + bbox.width * 0.88));
+  const y0 = Math.max(0, Math.floor(bbox.y + bbox.height * 0.12));
+  const y1 = Math.min(frameHeight - 1, Math.ceil(bbox.y + bbox.height * 0.88));
+  let total = 0, count = 0, darkest = Number.POSITIVE_INFINITY;
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      total += gray[y * frameWidth + x];
+      count++;
+    }
+  }
+  if (count === 0) return false;
+  const faceMean = total / count;
+
+  if (orientation === 'horizontal') {
+    const start = Math.max(x0, Math.floor(bbox.x + bbox.width * 0.34));
+    const end = Math.min(x1, Math.ceil(bbox.x + bbox.width * 0.66));
+    for (let x = start; x <= end; x++) {
+      let sum = 0;
+      for (let y = y0; y <= y1; y++) sum += gray[y * frameWidth + x];
+      darkest = Math.min(darkest, sum / Math.max(1, y1 - y0 + 1));
+    }
+  } else {
+    const start = Math.max(y0, Math.floor(bbox.y + bbox.height * 0.34));
+    const end = Math.min(y1, Math.ceil(bbox.y + bbox.height * 0.66));
+    for (let y = start; y <= end; y++) {
+      let sum = 0;
+      for (let x = x0; x <= x1; x++) sum += gray[y * frameWidth + x];
+      darkest = Math.min(darkest, sum / Math.max(1, x1 - x0 + 1));
+    }
+  }
+  return Number.isFinite(darkest) && darkest < Math.min(145, faceMean * 0.72);
+}
+
+/** Rejoins the two nearly-square face components when a black divider
+ * separates the halves completely in the binary body mask. */
+export function mergeAdjacentBodyComponents(
+  blobs: ComponentBlob[],
+  gray: Uint8Array,
+  width: number,
+  height: number
+): ComponentBlob[] {
+  const candidates = [...blobs];
+  const frameShort = Math.min(width, height);
+  // A physical centre bar can be wider than 3.5% of a tightly cropped image.
+  // Permit a wider gap only when the pixels in that gap are dark like a real
+  // divider; nearby unrelated white objects must not be joined.
+  const maxGap = Math.max(8, frameShort * 0.10);
+
+  const hasDarkSeparator = (
+    horizontal: boolean,
+    first: ComponentBlob,
+    second: ComponentBlob,
+    overlapStart: number,
+    overlapEnd: number,
+    gapStart: number,
+    gapEnd: number
+  ): boolean => {
+    if (gapEnd < gapStart) return true;
+    const span = overlapEnd - overlapStart + 1;
+    if (span <= 4) return false;
+    const from = overlapStart + Math.floor(span * 0.12);
+    const to = overlapEnd - Math.floor(span * 0.12);
+    let gapSum = 0, gapCount = 0, faceSum = 0, faceCount = 0;
+    const stride = Math.max(1, Math.floor((to - from + 1) / 100));
+    for (let cross = from; cross <= to; cross += stride) {
+      for (let along = gapStart; along <= gapEnd; along++) {
+        const x = horizontal ? along : cross;
+        const y = horizontal ? cross : along;
+        gapSum += gray[y * width + x];
+        gapCount++;
+      }
+      const firstEdge = horizontal
+        ? (first.maxX < second.minX ? first.maxX : second.maxX)
+        : (first.maxY < second.minY ? first.maxY : second.maxY);
+      const secondEdge = horizontal
+        ? (first.maxX < second.minX ? second.minX : first.minX)
+        : (first.maxY < second.minY ? second.minY : first.minY);
+      const x1 = horizontal ? firstEdge : cross;
+      const y1 = horizontal ? cross : firstEdge;
+      const x2 = horizontal ? secondEdge : cross;
+      const y2 = horizontal ? cross : secondEdge;
+      faceSum += gray[y1 * width + x1] + gray[y2 * width + x2];
+      faceCount += 2;
+    }
+    const gapMean = gapSum / Math.max(1, gapCount);
+    const faceMean = faceSum / Math.max(1, faceCount);
+    return gapMean < Math.min(145, faceMean * 0.72);
+  };
+
+  for (let i = 0; i < blobs.length; i++) {
+    const a = blobs[i];
+    const aw = a.maxX - a.minX + 1;
+    const ah = a.maxY - a.minY + 1;
+    const aShape = Math.max(aw, ah) / Math.max(1, Math.min(aw, ah));
+    if (aShape > 1.8) continue;
+
+    for (let j = i + 1; j < blobs.length; j++) {
+      const b = blobs[j];
+      const bw = b.maxX - b.minX + 1;
+      const bh = b.maxY - b.minY + 1;
+      const bShape = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
+      if (bShape > 1.8) continue;
+
+      const overlapY = Math.max(0, Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY) + 1);
+      const overlapX = Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) + 1);
+      const gapX = Math.max(0, Math.max(a.minX, b.minX) - Math.min(a.maxX, b.maxX) - 1);
+      const gapY = Math.max(0, Math.max(a.minY, b.minY) - Math.min(a.maxY, b.maxY) - 1);
+      const sameHeight = Math.min(ah, bh) / Math.max(ah, bh) >= 0.68;
+      const sameWidth = Math.min(aw, bw) / Math.max(aw, bw) >= 0.68;
+      const localGapLimit = Math.min(maxGap, Math.min(aw, ah, bw, bh) * 0.16);
+      const horizontalGeometry = sameHeight &&
+        overlapY / Math.max(1, Math.min(ah, bh)) >= 0.72 && gapX <= localGapLimit;
+      const verticalGeometry = sameWidth &&
+        overlapX / Math.max(1, Math.min(aw, bw)) >= 0.72 && gapY <= localGapLimit;
+      const horizontalPair = horizontalGeometry && hasDarkSeparator(
+        true, a, b, Math.max(a.minY, b.minY), Math.min(a.maxY, b.maxY),
+        Math.min(a.maxX, b.maxX) === a.maxX ? a.maxX + 1 : b.maxX + 1,
+        Math.max(a.minX, b.minX) - 1
+      );
+      const verticalPair = verticalGeometry && hasDarkSeparator(
+        false, a, b, Math.max(a.minX, b.minX), Math.min(a.maxX, b.maxX),
+        Math.min(a.maxY, b.maxY) === a.maxY ? a.maxY + 1 : b.maxY + 1,
+        Math.max(a.minY, b.minY) - 1
+      );
+      if (!horizontalPair && !verticalPair) continue;
+
+      const bbox = {
+        x: Math.min(a.minX, b.minX),
+        y: Math.min(a.minY, b.minY),
+        width: Math.max(a.maxX, b.maxX) - Math.min(a.minX, b.minX) + 1,
+        height: Math.max(a.maxY, b.maxY) - Math.min(a.minY, b.minY) + 1,
+      };
+      if (!isPlausibleDominoBodyBox(bbox, width, height)) continue;
+      if (candidates.some((existing) =>
+        existing.minX === bbox.x && existing.minY === bbox.y &&
+        existing.maxX === bbox.x + bbox.width - 1 &&
+        existing.maxY === bbox.y + bbox.height - 1
+      )) continue;
+
+      const area = a.area + b.area;
+      candidates.push({
+        id: -((i + 1) * 10000 + j + 1),
+        minX: bbox.x,
+        maxX: bbox.x + bbox.width - 1,
+        minY: bbox.y,
+        maxY: bbox.y + bbox.height - 1,
+        area,
+        perimeter: 2 * (bbox.width + bbox.height),
+        centroidX: Math.round((a.centroidX * a.area + b.centroidX * b.area) / Math.max(1, area)),
+        centroidY: Math.round((a.centroidY * a.area + b.centroidY * b.area) / Math.max(1, area)),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+
+/**
+ * Splits a merged, near-square bright component into two physical domino bodies
+ * when a dark seam is visible between them. This targets touching white tiles:
+ * their neutral masks can become one component even though each tile is elongated.
+ */
+export function splitMergedBodyComponents(
+  blobs: ComponentBlob[],
+  gray: Uint8Array,
+  width: number,
+  height: number
+): ComponentBlob[] {
+  const output: ComponentBlob[] = [];
+  for (const blob of blobs) {
+    const x = blob.minX, y = blob.minY;
+    const w = blob.maxX - blob.minX + 1, h = blob.maxY - blob.minY + 1;
+    const shape = Math.max(w, h) / Math.max(1, Math.min(w, h));
+    if (shape < 0.72 || shape > 1.38) {
+      output.push(blob);
+      continue;
+    }
+
+    const verticalSplit = w >= h;
+    const axisLength = verticalSplit ? w : h;
+    const crossLength = verticalSplit ? h : w;
+    const crossStart = Math.floor(crossLength * 0.12);
+    const crossEnd = Math.ceil(crossLength * 0.88);
+    let faceSum = 0, faceCount = 0;
+    for (let c = crossStart; c < crossEnd; c++) {
+      for (let a = 0; a < axisLength; a += Math.max(1, Math.floor(axisLength / 120))) {
+        const px = verticalSplit ? x + a : x + c;
+        const py = verticalSplit ? y + c : y + a;
+        faceSum += gray[py * width + px];
+        faceCount++;
+      }
+    }
+    const faceMean = faceSum / Math.max(1, faceCount);
+    let bestPosition = -1, bestMean = Number.POSITIVE_INFINITY;
+    const minPosition = Math.ceil(axisLength * 0.38);
+    const maxPosition = Math.floor(axisLength * 0.62);
+    for (let pos = minPosition; pos <= maxPosition; pos++) {
+      let sum = 0, count = 0;
+      for (let c = crossStart; c < crossEnd; c++) {
+        const px = verticalSplit ? x + pos : x + c;
+        const py = verticalSplit ? y + c : y + pos;
+        sum += gray[py * width + px];
+        count++;
+      }
+      const mean = sum / Math.max(1, count);
+      if (mean < bestMean) { bestMean = mean; bestPosition = pos; }
+    }
+
+    if (bestPosition < 0 || bestMean >= Math.min(145, faceMean * 0.72)) {
+      output.push(blob);
+      continue;
+    }
+
+    const boxes = verticalSplit
+      ? [
+          { x, y, width: bestPosition, height: h },
+          { x: x + bestPosition + 1, y, width: w - bestPosition - 1, height: h },
+        ]
+      : [
+          { x, y, width: w, height: bestPosition },
+          { x, y: y + bestPosition + 1, width: w, height: h - bestPosition - 1 },
+        ];
+    if (!boxes.every(box => isPlausibleDominoBodyBox(box, width, height))) {
+      output.push(blob);
+      continue;
+    }
+
+    for (let index = 0; index < boxes.length; index++) {
+      const box = boxes[index];
+      const fraction = (box.width * box.height) / Math.max(1, w * h);
+      const area = Math.max(1, Math.round(blob.area * fraction));
+      output.push({
+        id: -(Math.abs(blob.id) * 10 + index + 1),
+        minX: box.x, maxX: box.x + box.width - 1,
+        minY: box.y, maxY: box.y + box.height - 1,
+        area, perimeter: 2 * (box.width + box.height),
+        centroidX: Math.round(box.x + (box.width - 1) / 2),
+        centroidY: Math.round(box.y + (box.height - 1) / 2),
+      });
+    }
+  }
+  return output;
+}
+
+/** Yellow pip mask; only compact, approximately circular yellow components
+ * are pips. A solid yellow domino face is intentionally excluded. */
+export function buildYellowPipMask(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  if (width <= 0 || height <= 0 || rgbaPixels.length !== width * height * 4) {
+    throw new Error('Invalid RGBA frame dimensions');
+  }
+  const raw = new Uint8Array(width * height);
+  for (let i = 0; i < raw.length; i++) {
+    const offset = i * 4;
+    if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
+      raw[i] = 1;
+    }
+  }
+
+  const frameShort = Math.min(width, height);
+  const minRadius = Math.max(2.5, frameShort * 0.005);
+  const maxRadius = Math.max(minRadius + 1, frameShort * 0.06);
+  const blobs = findConnectedComponents(
+    raw, width, height,
+    Math.max(4, Math.PI * minRadius * minRadius * 0.5),
+    Math.min(width * height * 0.02, Math.PI * maxRadius * maxRadius * 1.6)
+  );
+  const mask = new Uint8Array(raw.length);
+  for (const blob of blobs) {
+    const blobWidth = blob.maxX - blob.minX + 1;
+    const blobHeight = blob.maxY - blob.minY + 1;
+    const aspect = blobWidth / Math.max(1, blobHeight);
+    const radius = Math.sqrt(blob.area / Math.PI);
+    if (aspect < 0.55 || aspect > 1.8 || radius < minRadius || radius > maxRadius) continue;
+    if (computeCircularity(blob.area, blob.perimeter) < 0.24) continue;
+    for (let y = blob.minY; y <= blob.maxY; y++) {
+      for (let x = blob.minX; x <= blob.maxX; x++) {
+        const index = y * width + x;
+        if (raw[index]) mask[index] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
+/** Detects non-neutral pip colours (blue, green, red, purple, yellow, etc.)
+ * independently of luminance. The mask is deliberately component-based: broad
+ * coloured backgrounds are excluded by compact size, near-round shape and
+ * circularity checks. Neutral black/grey pips remain covered by the grayscale
+ * and adaptive masks. */
+export function buildChromaticPipMask(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  if (width <= 0 || height <= 0 || rgbaPixels.length !== width * height * 4) {
+    throw new Error('Invalid RGBA frame dimensions');
+  }
+  const raw = new Uint8Array(width * height);
+  for (let i = 0; i < raw.length; i++) {
+    const offset = i * 4;
+    const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
+    const maximum = Math.max(r, g, b);
+    const minimum = Math.min(r, g, b);
+    const chroma = maximum - minimum;
+    const saturation = maximum > 0 ? chroma / maximum : 0;
+    if (maximum >= 65 && chroma >= 24 && saturation >= 0.20) raw[i] = 1;
+  }
+
+  const frameShort = Math.min(width, height);
+  const minRadius = Math.max(2.5, frameShort * 0.0045);
+  const maxRadius = Math.max(minRadius + 1, frameShort * 0.055);
+  const blobs = findConnectedComponents(
+    raw, width, height,
+    Math.max(4, Math.PI * minRadius * minRadius * 0.38),
+    Math.min(width * height * 0.012, Math.PI * maxRadius * maxRadius * 1.5)
+  );
+  const mask = new Uint8Array(raw.length);
+  for (const blob of blobs) {
+    const blobWidth = blob.maxX - blob.minX + 1;
+    const blobHeight = blob.maxY - blob.minY + 1;
+    const aspect = blobWidth / Math.max(1, blobHeight);
+    const radius = Math.sqrt(blob.area / Math.PI);
+    if (aspect < 0.52 || aspect > 1.92 || radius < minRadius || radius > maxRadius) continue;
+    if (computeCircularity(blob.area, blob.perimeter) < 0.20) continue;
+    for (let y = blob.minY; y <= blob.maxY; y++) {
+      for (let x = blob.minX; x <= blob.maxX; x++) {
+        const index = y * width + x;
+        if (raw[index]) mask[index] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
+
+/**
+ * Counts compact chromatic regions inside one physical domino half without
+ * requiring a circular pip silhouette. This is an independent colour signal:
+ * hue/saturation separates coloured marks from the ivory face, while component
+ * area and scale reject large coloured surfaces and isolated sensor noise.
+ */
+export function detectColorRegionsInHalf(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  fullWidth: number,
+  fullHeight: number,
+  halfBbox: { x: number; y: number; width: number; height: number }
+): DetectedPip[] {
+  const { x, y, width, height } = halfBbox;
+  if (fullWidth <= 0 || fullHeight <= 0 || rgbaPixels.length !== fullWidth * fullHeight * 4 ||
+      x < 0 || y < 0 || width <= 4 || height <= 4 ||
+      x + width > fullWidth || y + height > fullHeight) return [];
+
+  // Calibrate against the dominant face colour inside this physical half.
+  // This captures every pip family (blue/green/red/yellow/orange/purple and
+  // neutral grey/black) without assigning a fixed hue to a domino value.
+  const histograms = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  const sampleX0 = Math.floor(width * 0.10);
+  const sampleX1 = Math.ceil(width * 0.90);
+  const sampleY0 = Math.floor(height * 0.10);
+  const sampleY1 = Math.ceil(height * 0.90);
+  let sampleCount = 0;
+
+  for (let py = sampleY0; py < sampleY1; py++) {
+    for (let px = sampleX0; px < sampleX1; px++) {
+      const offset = ((y + py) * fullWidth + x + px) * 4;
+      histograms[0][rgbaPixels[offset]]++;
+      histograms[1][rgbaPixels[offset + 1]]++;
+      histograms[2][rgbaPixels[offset + 2]]++;
+      sampleCount++;
+    }
+  }
+
+  const medianChannel = (histogram: Uint32Array): number => {
+    const target = Math.floor(sampleCount / 2);
+    let accumulated = 0;
+    for (let value = 0; value < histogram.length; value++) {
+      accumulated += histogram[value];
+      if (accumulated > target) return value;
+    }
+    return 128;
+  };
+  const face = [medianChannel(histograms[0]), medianChannel(histograms[1]), medianChannel(histograms[2])];
+
+  // Estimate normal face texture/noise with a small distance histogram.
+  // The lower bound keeps pale coloured pips visible; the adaptive term avoids
+  // turning grain or uneven illumination into hundreds of candidate regions.
+  const distances = new Uint8Array(width * height);
+  const distanceHistogram = new Uint32Array(256);
+  for (let py = sampleY0; py < sampleY1; py++) {
+    for (let px = sampleX0; px < sampleX1; px++) {
+      const offset = ((y + py) * fullWidth + x + px) * 4;
+      const dr = rgbaPixels[offset] - face[0];
+      const dg = rgbaPixels[offset + 1] - face[1];
+      const db = rgbaPixels[offset + 2] - face[2];
+      const distance = Math.min(255, Math.round(Math.sqrt(dr * dr + dg * dg + db * db)));
+      distanceHistogram[distance]++;
+    }
+  }
+
+  const medianDistance = (() => {
+    const target = Math.floor(sampleCount / 2);
+    let accumulated = 0;
+    for (let value = 0; value < distanceHistogram.length; value++) {
+      accumulated += distanceHistogram[value];
+      if (accumulated > target) return value;
+    }
+    return 0;
+  })();
+  const deviationHistogram = new Uint32Array(256);
+  for (let distance = 0; distance < distanceHistogram.length; distance++) {
+    deviationHistogram[Math.abs(distance - medianDistance)] += distanceHistogram[distance];
+  }
+  const noiseDeviation = (() => {
+    const target = Math.floor(sampleCount * 0.75);
+    let accumulated = 0;
+    for (let value = 0; value < deviationHistogram.length; value++) {
+      accumulated += deviationHistogram[value];
+      if (accumulated > target) return value;
+    }
+    return 0;
+  })();
+  const colourDistanceThreshold = Math.max(34, medianDistance + noiseDeviation * 2.5);
+
+  const raw = new Uint8Array(width * height);
+  const marginX = Math.max(2, Math.round(width * 0.035));
+  const marginY = Math.max(2, Math.round(height * 0.035));
+  for (let py = marginY; py < height - marginY; py++) {
+    for (let px = marginX; px < width - marginX; px++) {
+      const offset = ((y + py) * fullWidth + x + px) * 4;
+      const dr = rgbaPixels[offset] - face[0];
+      const dg = rgbaPixels[offset + 1] - face[1];
+      const db = rgbaPixels[offset + 2] - face[2];
+      if (Math.sqrt(dr * dr + dg * dg + db * db) >= colourDistanceThreshold) {
+        raw[py * width + px] = 1;
+      }
+    }
+  }
+
+  const minArea = Math.max(5, width * height * 0.00006);
+  const maxArea = Math.max(minArea + 1, Math.min(width * height * 0.045, Math.min(width, height) ** 2 * 0.10));
+  const blobs = findConnectedComponents(raw, width, height, minArea, maxArea);
+  const minDimension = Math.min(width, height);
+  const maxRegionDimension = Math.max(5, minDimension * 0.30);
+  const candidates: DetectedPip[] = [];
+
+  for (const blob of blobs) {
+    const regionWidth = blob.maxX - blob.minX + 1;
+    const regionHeight = blob.maxY - blob.minY + 1;
+    if (Math.max(regionWidth, regionHeight) > maxRegionDimension) continue;
+    const aspect = regionWidth / Math.max(1, regionHeight);
+    if (aspect < 0.38 || aspect > 2.65) continue;
+    const radius = Math.max(2, Math.sqrt(blob.area / Math.PI));
+    candidates.push({
+      x: x + blob.centroidX,
+      y: y + blob.centroidY,
+      radius: Math.round(radius),
+      area: blob.area,
+      circularity: computeCircularity(blob.area, blob.perimeter),
+    });
+  }
+
+  const unique: DetectedPip[] = [];
+  for (const candidate of candidates) {
+    const duplicate = unique.find(other =>
+      Math.hypot(candidate.x - other.x, candidate.y - other.y) <
+      Math.max(3, Math.min(candidate.radius, other.radius) * 0.8)
+    );
+    if (!duplicate) unique.push(candidate);
+    else if (candidate.area > duplicate.area) Object.assign(duplicate, candidate);
+  }
+  return unique.slice(0, 12);
+}
+
+/**
+ * Separates neutral ivory/white domino faces from coloured backgrounds. Otsu
+ * plus a small offset adapts to exposure while retaining the complete tile
+ * face, rather than clipping shadowed edges at a high percentile.
+ */
+export function buildNeutralDominoBodyMask(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  gray: Uint8Array,
+  width: number,
+  height: number
+): Uint8Array {
+  if (width <= 0 || height <= 0 || gray.length !== width * height || rgbaPixels.length !== width * height * 4) {
+    throw new Error('Invalid frame dimensions');
+  }
+  const threshold = Math.max(40, computeOtsuThreshold(gray) + 8);
+  const mask = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    if (gray[i] < threshold) continue;
+    const offset = i * 4;
+    const r = rgbaPixels[offset], g = rgbaPixels[offset + 1], b = rgbaPixels[offset + 2];
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    if (chroma <= Math.max(28, gray[i] * 0.16)) mask[i] = 1;
+  }
+  return mask;
+}
+
 /**
  * Main Offline Detection Pipeline:
  * Analyzes pixel data from HTML5 Canvas / Camera frame without any external server or API.
  * Detects multiple dominoes and catalogs each piece individually.
  */
+
+interface PipGroupCandidate {
+  axis: 0 | 1;
+  count: number;
+  clusters: DetectedPip[][];
+  score: number;
+}
+
+/** Deterministic 1-D k-means used to separate spatially distinct domino bodies. */
+/** Globally optimal 1-D clustering via dynamic programming on sorted coordinates. */
+function clusterPipsOnAxis(pips: DetectedPip[], axis: 0 | 1, k: number): DetectedPip[][] {
+  const sorted = [...pips].sort((a, b) => (axis === 0 ? a.x - b.x : a.y - b.y));
+  const n = sorted.length;
+  if (k < 1 || k > n) return [];
+
+  const prefix = new Float64Array(n + 1);
+  const prefixSquares = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    const value = axis === 0 ? sorted[i].x : sorted[i].y;
+    prefix[i + 1] = prefix[i] + value;
+    prefixSquares[i + 1] = prefixSquares[i] + value * value;
+  }
+
+  const columns = n + 1;
+  const dp = new Float64Array((k + 1) * columns);
+  const back = new Int16Array((k + 1) * columns);
+  dp.fill(Number.POSITIVE_INFINITY);
+  back.fill(-1);
+  dp[0] = 0;
+
+  const intervalCost = (from: number, to: number): number => {
+    const count = to - from;
+    if (count <= 0) return Number.POSITIVE_INFINITY;
+    const sum = prefix[to] - prefix[from];
+    const sumSquares = prefixSquares[to] - prefixSquares[from];
+    return Math.max(0, sumSquares - (sum * sum) / count);
+  };
+
+  for (let groups = 1; groups <= k; groups++) {
+    for (let end = groups; end <= n; end++) {
+      const row = groups * columns + end;
+      for (let split = groups - 1; split < end; split++) {
+        const candidate = dp[(groups - 1) * columns + split] + intervalCost(split, end);
+        if (candidate < dp[row]) {
+          dp[row] = candidate;
+          back[row] = split;
+        }
+      }
+    }
+  }
+
+  const groups: DetectedPip[][] = [];
+  let end = n;
+  for (let groupCount = k; groupCount >= 1; groupCount--) {
+    const split = back[groupCount * columns + end];
+    if (split < 0) return [];
+    groups.push(sorted.slice(split, end));
+    end = split;
+  }
+  return groups.reverse();
+}
+
+function findPlausiblePipGrouping(
+  pips: DetectedPip[],
+  width: number,
+  height: number
+): PipGroupCandidate | null {
+  if (pips.length < 8) return null;
+  const frameShort = Math.min(width, height);
+
+  // Estimate the local pip spacing from nearest-neighbour distances. A gap
+  // significantly larger than this is a stronger separator than a global
+  // one-axis clustering when the tray contains several rows of dominoes.
+  const nearestDistances = pips.map((pip, i) => {
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let j = 0; j < pips.length; j++) {
+      if (i === j) continue;
+      nearest = Math.min(nearest, Math.hypot(pip.x - pips[j].x, pip.y - pips[j].y));
+    }
+    return nearest;
+  }).filter(Number.isFinite).sort((a, b) => a - b);
+  const medianNearest = nearestDistances[Math.floor(nearestDistances.length / 2)] || frameShort * 0.03;
+  const splitFloor = Math.max(frameShort * 0.014, medianNearest * 1.5);
+
+  const recurse = (group: DetectedPip[], depth: number): DetectedPip[][] => {
+    if (group.length < 4) return [];
+    const xs = group.map((p) => p.x);
+    const ys = group.map((p) => p.y);
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    const shortSpan = Math.min(spanX, spanY);
+    const longSpan = Math.max(spanX, spanY);
+    const aspect = longSpan / Math.max(1, shortSpan);
+    const looksLikeTile =
+      group.length <= 24 &&
+      shortSpan >= Math.max(8, frameShort * 0.018) &&
+      longSpan >= frameShort * 0.045 &&
+      aspect >= 1.05 && aspect <= 3.8;
+
+    if (looksLikeTile) return [group];
+    if (depth >= 8 || group.length < 8) return [];
+
+    let best: { axis: 0 | 1; index: number; gap: number; left: DetectedPip[]; right: DetectedPip[] } | null = null;
+    for (const axis of [0, 1] as const) {
+      const sorted = [...group].sort((a, b) => (axis === 0 ? a.x - b.x : a.y - b.y));
+      for (let i = 1; i < sorted.length - 1; i++) {
+        const previous = axis === 0 ? sorted[i - 1].x : sorted[i - 1].y;
+        const next = axis === 0 ? sorted[i].x : sorted[i].y;
+        const gap = next - previous;
+        if (gap <= splitFloor) continue;
+        const left = sorted.slice(0, i);
+        const right = sorted.slice(i);
+        if (left.length < 4 || right.length < 4) continue;
+        if (!best || gap > best.gap) best = { axis, index: i, gap, left, right };
+      }
+    }
+    if (!best) return [];
+
+    const leftGroups = recurse(best.left, depth + 1);
+    const rightGroups = recurse(best.right, depth + 1);
+    if (leftGroups.length === 0 || rightGroups.length === 0) return [];
+    return [...leftGroups, ...rightGroups];
+  };
+
+  const clusters = recurse(pips, 0);
+  if (clusters.length >= 2 && clusters.length <= 12 &&
+      clusters.every((group) => group.length >= 4 && group.length <= 24)) {
+    let score = 0;
+    for (const group of clusters) {
+      const xs = group.map((p) => p.x);
+      const ys = group.map((p) => p.y);
+      const spanX = Math.max(...xs) - Math.min(...xs);
+      const spanY = Math.max(...ys) - Math.min(...ys);
+      const aspect = Math.max(spanX, spanY) / Math.max(1, Math.min(spanX, spanY));
+      score += 10 - Math.abs(Math.log(aspect / 2.0));
+    }
+    return { axis: 0, count: clusters.length, clusters, score };
+  }
+
+  // Exact 1-D partition fallback for a single-row or single-column tray.
+  let best: PipGroupCandidate | null = null;
+  const maxGroups = Math.min(12, Math.floor(pips.length / 4));
+  for (const axis of [0, 1] as const) {
+    for (let count = 2; count <= maxGroups; count++) {
+      const groups = clusterPipsOnAxis(pips, axis, count);
+      if (groups.length !== count) continue;
+      let valid = true;
+      let score = count * 10;
+      for (const group of groups) {
+        if (group.length < 4 || group.length > 24) { valid = false; break; }
+        const xs = group.map((p) => p.x);
+        const ys = group.map((p) => p.y);
+        const spanX = Math.max(...xs) - Math.min(...xs);
+        const spanY = Math.max(...ys) - Math.min(...ys);
+        const shortSpan = Math.min(spanX, spanY);
+        const longSpan = Math.max(spanX, spanY);
+        const aspect = longSpan / Math.max(1, shortSpan);
+        if (shortSpan < Math.max(12, frameShort * 0.025) ||
+            longSpan < frameShort * 0.05 || aspect < 1.05 || aspect > 3.8) {
+          valid = false;
+          break;
+        }
+        score -= Math.abs(Math.log(aspect / 2.0));
+      }
+      if (valid && (!best || score > best.score)) {
+        best = { axis, count, clusters: groups, score };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Gradient-based radial voting for shiny/low-contrast pips.
+ * It votes for circle centres from edge normals, rather than requiring a dark
+ * filled blob. This keeps yellow and grey pips visible under exposure changes.
+ */
+export function detectPipsByRadialVoting(
+  gray: Uint8Array,
+  width: number,
+  height: number
+): DetectedPip[] {
+  if (width < 24 || height < 24 || gray.length !== width * height) return [];
+
+  const smooth = new Float32Array(gray.length);
+  const gx = new Float32Array(gray.length);
+  const gy = new Float32Array(gray.length);
+  const magnitude = new Float32Array(gray.length);
+  const histogram = new Uint32Array(2048);
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const i = y * width + x;
+      smooth[i] = (
+        gray[i - width - 1] + 2 * gray[i - width] + gray[i - width + 1] +
+        2 * gray[i - 1] + 4 * gray[i] + 2 * gray[i + 1] +
+        gray[i + width - 1] + 2 * gray[i + width] + gray[i + width + 1]
+      ) / 16;
+    }
+  }
+
+  let edgeCount = 0;
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const i = y * width + x;
+      const p00 = smooth[i - width - 1], p01 = smooth[i - width], p02 = smooth[i - width + 1];
+      const p10 = smooth[i - 1], p12 = smooth[i + 1];
+      const p20 = smooth[i + width - 1], p21 = smooth[i + width], p22 = smooth[i + width + 1];
+      const sx = -p00 + p02 - 2 * p10 + 2 * p12 - p20 + p22;
+      const sy = -p00 - 2 * p01 - p02 + p20 + 2 * p21 + p22;
+      gx[i] = sx;
+      gy[i] = sy;
+      const mag = Math.hypot(sx, sy);
+      magnitude[i] = mag;
+      histogram[Math.min(2047, Math.round(mag))]++;
+      edgeCount++;
+    }
+  }
+
+  let thresholdCount = Math.ceil(edgeCount * 0.78);
+  let accumulated = 0;
+  let edgeThreshold = 0;
+  for (let i = 0; i < histogram.length; i++) {
+    accumulated += histogram[i];
+    if (accumulated >= thresholdCount) {
+      edgeThreshold = i;
+      break;
+    }
+  }
+
+  const shortSide = Math.min(width, height);
+  // Reference photos show pip radii around 2–4% of the frame short side.
+  // The wider band recovers pale and glossy dots without counting them as
+  // independent pieces: centres are accepted only inside a confirmed body.
+  const minRadius = Math.max(4, Math.round(shortSide * 0.012));
+  const maxRadius = Math.max(minRadius + 1, Math.round(shortSide * 0.046));
+  const accumulator = new Uint16Array(gray.length);
+
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const i = y * width + x;
+      const mag = magnitude[i];
+      if (mag <= edgeThreshold || mag < 1) continue;
+      const ux = gx[i] / mag;
+      const uy = gy[i] / mag;
+      for (let radius = minRadius; radius <= maxRadius; radius++) {
+        const dx = ux * radius;
+        const dy = uy * radius;
+        const x1 = Math.round(x - dx), y1 = Math.round(y - dy);
+        const x2 = Math.round(x + dx), y2 = Math.round(y + dy);
+        if (x1 >= 0 && x1 < width && y1 >= 0 && y1 < height) {
+          const at = y1 * width + x1;
+          if (accumulator[at] < 65535) accumulator[at]++;
+        }
+        if (x2 >= 0 && x2 < width && y2 >= 0 && y2 < height) {
+          const at = y2 * width + x2;
+          if (accumulator[at] < 65535) accumulator[at]++;
+        }
+      }
+    }
+  }
+
+  let maximumVotes = 0;
+  for (let i = 0; i < accumulator.length; i++) {
+    if (accumulator[i] > maximumVotes) maximumVotes = accumulator[i];
+  }
+  if (maximumVotes < 8) return [];
+  const minVotes = 7;
+  const voteThreshold = Math.max(minVotes, maximumVotes * 0.16);
+  const candidates: Array<{ x: number; y: number; votes: number }> = [];
+
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const i = y * width + x;
+      const votes = accumulator[i];
+      if (votes < voteThreshold) continue;
+      let isMaximum = true;
+      for (let dy = -2; dy <= 2 && isMaximum; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if ((dx !== 0 || dy !== 0) && accumulator[(y + dy) * width + x + dx] > votes) {
+            isMaximum = false;
+            break;
+          }
+        }
+      }
+      if (isMaximum) candidates.push({ x, y, votes });
+    }
+  }
+
+  candidates.sort((a, b) => b.votes - a.votes);
+  const minDistance = Math.max(6, Math.round(shortSide * 0.029));
+  const minDistanceSquared = minDistance * minDistance;
+  const selected: DetectedPip[] = [];
+  const radius = (minRadius + maxRadius) / 2;
+  for (const candidate of candidates) {
+    if (selected.some((other) => {
+      const dx = candidate.x - other.x;
+      const dy = candidate.y - other.y;
+      return dx * dx + dy * dy < minDistanceSquared;
+    })) continue;
+    selected.push({
+      x: candidate.x,
+      y: candidate.y,
+      radius: Math.round(radius),
+      area: Math.PI * radius * radius,
+      circularity: 0.82,
+    });
+  }
+  return selected;
+}
+
+function tilesFromRadialPips(
+  pips: DetectedPip[],
+  gray: Uint8Array,
+  width: number,
+  height: number
+): DetectedTileCV[] {
+  const grouping = findPlausiblePipGrouping(pips, width, height);
+  if (!grouping) return [];
+  const frameShort = Math.min(width, height);
+  const medianRadius = [...pips].map((p) => p.radius).sort((a, b) => a - b)[Math.floor(pips.length / 2)] || 6;
+  const tiles: DetectedTileCV[] = [];
+
+  grouping.clusters.forEach((group, index) => {
+    const xs = group.map((p) => p.x);
+    const ys = group.map((p) => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const orientation: 'vertical' | 'horizontal' = spanY >= spanX ? 'vertical' : 'horizontal';
+    const pad = Math.max(10, Math.round(medianRadius * 1.5), Math.round(Math.min(spanX, spanY) * 0.12));
+    const bbox = {
+      x: Math.max(0, minX - pad),
+      y: Math.max(0, minY - pad),
+      width: Math.min(width - Math.max(0, minX - pad), spanX + 1 + pad * 2),
+      height: Math.min(height - Math.max(0, minY - pad), spanY + 1 + pad * 2),
+    };
+    if (!isPlausibleDominoBox(bbox, width, height)) return;
+
+    let divider = 0;
+    if (orientation === 'vertical') {
+      const scanStart = Math.max(0, Math.floor(minY + spanY * 0.32));
+      const scanEnd = Math.min(height - 1, Math.ceil(minY + spanY * 0.68));
+      let darkest = Number.POSITIVE_INFINITY;
+      for (let y = scanStart; y <= scanEnd; y++) {
+        let sum = 0;
+        for (let x = minX; x <= maxX; x++) sum += gray[y * width + x];
+        const mean = sum / Math.max(1, maxX - minX + 1);
+        if (mean < darkest) {
+          darkest = mean;
+          divider = y;
+        }
+      }
+      // Use the divider stripe only when it is visibly darker than the local tile.
+      const localMean = group.reduce((sum, pip) => sum + gray[Math.max(0, Math.min(height - 1, pip.y)) * width + Math.max(0, Math.min(width - 1, pip.x))], 0) / group.length;
+      if (!Number.isFinite(darkest) || darkest > localMean * 0.78) divider = Math.round((minY + maxY) / 2);
+    } else {
+      const scanStart = Math.max(0, Math.floor(minX + spanX * 0.32));
+      const scanEnd = Math.min(width - 1, Math.ceil(minX + spanX * 0.68));
+      let darkest = Number.POSITIVE_INFINITY;
+      for (let x = scanStart; x <= scanEnd; x++) {
+        let sum = 0;
+        for (let y = minY; y <= maxY; y++) sum += gray[y * width + x];
+        const mean = sum / Math.max(1, maxY - minY + 1);
+        if (mean < darkest) {
+          darkest = mean;
+          divider = x;
+        }
+      }
+      const localMean = group.reduce((sum, pip) => sum + gray[Math.max(0, Math.min(height - 1, pip.y)) * width + Math.max(0, Math.min(width - 1, pip.x))], 0) / group.length;
+      if (!Number.isFinite(darkest) || darkest > localMean * 0.78) divider = Math.round((minX + maxX) / 2);
+    }
+
+    const pipsA = orientation === 'vertical'
+      ? group.filter((p) => p.y < divider)
+      : group.filter((p) => p.x < divider);
+    const pipsB = orientation === 'vertical'
+      ? group.filter((p) => p.y > divider)
+      : group.filter((p) => p.x > divider);
+    if (pipsA.length > 12 || pipsB.length > 12 || pipsA.length + pipsB.length < 4) return;
+
+    const { halfA, halfB } = splitTileHalves(bbox, orientation);
+    const sideA = pipsA.length;
+    const sideB = pipsB.length;
+    tiles.push({
+      id: `tile-hough-${index + 1}`,
+      bbox,
+      orientation,
+      halfA: { bbox: halfA, pips: pipsA, count: sideA },
+      halfB: { bbox: halfB, pips: pipsB, count: sideB },
+      sideA,
+      sideB,
+      points: sideA + sideB,
+      confidence: 0.88,
+      label: `[${sideA}|${sideB}]`,
+    });
+  });
+
+  return tiles;
+}
+
+/** Full-frame domino cataloguing from circular pip centres and the centre divider. */
+export function detectDominoesByRadialVoting(
+  rgbaPixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number
+): DetectedTileCV[] {
+  const gray = rgbToGrayscale(rgbaPixels, width, height);
+  const pips = detectPipsByRadialVoting(gray, width, height);
+  return tilesFromRadialPips(pips, gray, width, height);
+}
+
+
 export function detectDominoesOffline(
   rgbaPixels: Uint8ClampedArray | Uint8Array,
   width: number,
@@ -615,27 +1663,47 @@ export function detectDominoesOffline(
     threshold = computeOtsuThreshold(gray);
   }
 
-  // 1. Detect Pips: Pips are dark circular marks
-  const pipThreshold = Math.max(20, threshold - 15);
-  const binPips = binarize(gray, pipThreshold, options.invertColors ?? false);
+  // Pip centres are counted only inside a physically segmented domino body.
+  // Full-frame radial proposals are intentionally not promoted to tiles: table
+  // grain, shadows and printed patterns can form convincing circular clusters.
 
-  // 2. Detect Domino Bodies: Light ivory surfaces
-  const tileThreshold = Math.min(235, threshold + 18);
-  const binTiles = binarize(gray, tileThreshold, true);
+  // 1. Detect Pips with both adaptive local contrast and the classic threshold.
+  // The adaptive mask retains glossy yellow/grey pips when their luminance is
+  // close to the tile face; the local-brightness gate rejects dark table texture.
+  const pipThreshold = Math.min(220, Math.max(105, threshold + 12));
+  const classicPips = binarize(gray, pipThreshold, options.invertColors ?? false);
+  const adaptivePips = buildAdaptivePipMask(gray, width, height, options.invertColors ?? false);
+  const yellowPips = buildYellowPipMask(rgbaPixels, width, height);
+  const chromaticPips = buildChromaticPipMask(rgbaPixels, width, height);
+  const binPips = new Uint8Array(gray.length);
+  for (let i = 0; i < binPips.length; i++) {
+    binPips[i] = classicPips[i] || adaptivePips[i] || yellowPips[i] || chromaticPips[i] ? 1 : 0;
+  }
 
-  // Find candidate tile blobs
-  const minTileArea = (width * height) * 0.005; // 0.5% of frame
-  const maxTileArea = (width * height) * 0.75;
+  // 2. Detect neutral ivory/white bodies and add all chromatic yellow surface
+  // pixels only to the body mask. Yellow pip counting above keeps only round
+  // yellow components, so a yellow tile face cannot become one giant pip.
+  const binTiles = buildNeutralDominoBodyMask(rgbaPixels, gray, width, height);
+  for (let i = 0; i < binTiles.length; i++) {
+    const offset = i * 4;
+    if (isYellowTilePixel(rgbaPixels[offset], rgbaPixels[offset + 1], rgbaPixels[offset + 2])) {
+      binTiles[i] = 1;
+    }
+  }
+
+  // Reject tiny specks and oversized regions at the connected-component stage.
+  const minTileArea = (width * height) * 0.00035;
+  const maxTileArea = (width * height) * 0.45;
   const tileBlobs = findConnectedComponents(binTiles, width, height, minTileArea, maxTileArea);
 
-  // Filter blobs with domino-like aspect ratios (~1:2 or 2:1)
-  const candidateBlobs = tileBlobs.filter((b) => {
+  // Dominoes are elongated rectangles; allow perspective, but reject irregular blobs.
+  const mergedBodyBlobs = splitMergedBodyComponents(mergeAdjacentBodyComponents(tileBlobs, gray, width, height), gray, width, height);
+  const candidateBlobs = mergedBodyBlobs.filter((b) => {
     const bw = b.maxX - b.minX + 1;
     const bh = b.maxY - b.minY + 1;
-    const aspect = bw / Math.max(1, bh);
-    const isVertical = aspect >= 0.35 && aspect <= 0.85;
-    const isHorizontal = aspect >= 1.20 && aspect <= 2.85;
-    return isVertical || isHorizontal;
+    const bbox = { x: b.minX, y: b.minY, width: bw, height: bh };
+    const rectangularity = b.area / Math.max(1, bw * bh);
+    return isPlausibleDominoBodyBox(bbox, width, height) && rectangularity >= 0.24;
   });
 
   const detectedTiles: DetectedTileCV[] = [];
@@ -649,13 +1717,41 @@ export function detectDominoesOffline(
       const bbox = { x: blob.minX, y: blob.minY, width: bw, height: bh };
 
       const { halfA, halfB } = splitTileHalves(bbox, orientation);
-      const pipsA = detectPipsInHalf(binPips, width, halfA);
-      const pipsB = detectPipsInHalf(binPips, width, halfB);
+      const minPipRadius = Math.max(3, Math.min(bw, bh) * 0.04);
+      const maxPipRadius = Math.max(minPipRadius + 1, Math.min(40, Math.min(bw, bh) * 0.24));
+      const maskPipsA = detectPipsInHalf(binPips, width, halfA, minPipRadius, maxPipRadius, 0.36);
+      const maskPipsB = detectPipsInHalf(binPips, width, halfB, minPipRadius, maxPipRadius, 0.36);
+      // Independent chroma pass: coloured marks are counted by their colour
+      // regions even when glare/printing makes their silhouette non-circular.
+      // Only regions inside the confirmed physical half are eligible.
+      const colorRegionsA = detectColorRegionsInHalf(rgbaPixels, width, height, halfA);
+      const colorRegionsB = detectColorRegionsInHalf(rgbaPixels, width, height, halfB);
+      const mergeSignals = (shape: DetectedPip[], color: DetectedPip[]) => {
+        const merged = [...shape];
+        for (const region of color) {
+          if (!merged.some(pip =>
+            Math.hypot(pip.x - region.x, pip.y - region.y) <
+            Math.max(4, Math.min(pip.radius, region.radius) * 1.25)
+          )) merged.push(region);
+        }
+        return merged.slice(0, 12);
+      };
+      // Neutral pips continue to come from luminance/local contrast; coloured
+      // pips gain a second route based on RGB chroma, not circle geometry alone.
+      const pipsA = mergeSignals(maskPipsA, colorRegionsA);
+      const pipsB = mergeSignals(maskPipsB, colorRegionsB);
 
       const countA = pipsA.length;
       const countB = pipsB.length;
-      const sideA = Math.min(countA, countB);
-      const sideB = Math.max(countA, countB);
+      // A body candidate needs a real centre separator and at least one
+      // circular pip; this prevents bright boards, trays and large objects
+      // from becoming dominoes solely because of their rectangular shape.
+      if (countA > 12 || countB > 12 || countA + countB === 0 ||
+          !hasDominoDivider(gray, width, height, bbox, orientation)) return;
+
+      // Preserve physical orientation: A is left/top, B is right/bottom.
+      const sideA = countA;
+      const sideB = countB;
 
       const confidence = Math.min(
         0.98,
@@ -677,30 +1773,10 @@ export function detectDominoesOffline(
     });
   }
 
-  // Phase B: Global Pip Spatial Clustering
-  // Detect all pips across the entire image to discover tiles that weren't segmented by tileBlobs
-  // (e.g. low background contrast, tiles touching each other, wood grain table)
-  const allGlobalPips = detectAllPips(binPips, width, height);
+  // Conservative fallback: never invent a domino from a global pip cluster.
+  // If the body mask cannot establish a physical tile, leave it for the user or
+  // the Gemini path rather than returning tabletop texture as a domino.
 
-  if (allGlobalPips.length > 0) {
-    // Filter out pips that are already accounted for by Phase A
-    const unaccountedPips = allGlobalPips.filter((pip) => {
-      return !detectedTiles.some((t) => {
-        const { x, y, width: tw, height: th } = t.bbox;
-        return pip.x >= x && pip.x <= x + tw && pip.y >= y && pip.y <= y + th;
-      });
-    });
-
-    if (unaccountedPips.length > 0) {
-      const clusteredTiles = clusterPipsIntoDominoes(unaccountedPips, width, height);
-      for (const cTile of clusteredTiles) {
-        cTile.id = `tile-cv-${detectedTiles.length + 1}`;
-        detectedTiles.push(cTile);
-      }
-    }
-  }
-
-  // Sort tiles from highest score to lowest (standard domino cataloging order)
   detectedTiles.sort((a, b) => b.points - a.points);
 
   const pieces: DetectedPiece[] = detectedTiles.map((tile) => ({

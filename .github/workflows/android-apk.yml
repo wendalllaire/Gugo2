@@ -1,9 +1,11 @@
 name: Android Debug APK
+# Publish a debug APK only when the vision regression suite passes.
 
 on:
   push:
     branches:
       - build/android-apk-capacitor
+      - fix/domino-vision-size-yellow
   pull_request:
     branches:
       - main
@@ -17,6 +19,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  grounding-dino-opencv-benchmark:
+    name: Experimental Grounding DINO (Apache-2.0) + OpenCV benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Grounding DINO runtime and OpenCV
+        run: |
+          python -m pip install --upgrade "transformers==4.57.1" timm opencv-python-headless pillow
+
+      - name: Benchmark Apache-2.0 Grounding DINO and OpenCV pip counting
+        run: python scripts/grounding_dino_opencv_experiment.py --samples public/samples --output artifacts/grounding-dino-opencv-results.json
+
+      - name: Upload experimental results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grounding-dino-opencv-experiment
+          path: artifacts/grounding-dino-opencv-results.json
+          if-no-files-found: warn
+          retention-days: 7
+
   build-debug-apk:
     name: Build Android debug APK
     runs-on: ubuntu-latest
@@ -42,6 +73,22 @@ jobs:
 
       - name: Build web application
         run: npm run build
+
+      - name: Test domino vision regression suite
+        id: vision_regression
+        run: npm run test:domino-vision
+
+      - name: Upload labelled vision samples for QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: domino-vision-golden-samples
+          # Keep illustrative Stagnation Lab/UI screenshots out of the gold-standard QA bundle.
+          path: |
+            public/samples/[0-9]*.jpg
+            public/samples/Todas peças v*.jpg
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Generate Android project
         run: npx cap add android

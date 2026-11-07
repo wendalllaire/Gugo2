@@ -106,7 +106,7 @@ export const CameraTab: React.FC<CameraTabProps> = ({
           !video.videoWidth || now - lastScanAt < 900) return;
 
       lastScanAt = now;
-      const scale = Math.min(1, 640 / video.videoWidth);
+      const scale = Math.min(1, 960 / video.videoWidth);
       previewCanvas.width = Math.max(1, Math.round(video.videoWidth * scale));
       previewCanvas.height = Math.max(1, Math.round(video.videoHeight * scale));
 
@@ -144,8 +144,8 @@ export const CameraTab: React.FC<CameraTabProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
@@ -172,22 +172,72 @@ export const CameraTab: React.FC<CameraTabProps> = ({
     setStreamActive(false);
   };
 
-  const handleCaptureSnapshot = () => {
-    if (!videoRef.current) return;
+  const handleCaptureSnapshot = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Prefer a true still photo from the camera sensor instead of saving a
+    // compressed video-preview frame. This is especially important for small,
+    // glossy yellow and grey pips that lose detail in the live stream.
+    const track = streamRef.current?.getVideoTracks()[0];
+    const ImageCaptureCtor = (window as Window & {
+      ImageCapture?: new (track: MediaStreamTrack) => { takePhoto: () => Promise<Blob> };
+    }).ImageCapture;
+
+    if (track && ImageCaptureCtor) {
+      let objectUrl: string | null = null;
+      try {
+        const capture = new ImageCaptureCtor(track);
+        const stillBlob = await capture.takePhoto();
+        objectUrl = URL.createObjectURL(stillBlob);
+        const stillImage = new Image();
+        await new Promise<void>((resolve, reject) => {
+          stillImage.onload = () => resolve();
+          stillImage.onerror = () => reject(new Error('Não foi possível descodificar a fotografia da câmara.'));
+          stillImage.src = objectUrl!;
+        });
+
+        const sourceWidth = stillImage.naturalWidth || stillImage.width;
+        const sourceHeight = stillImage.naturalHeight || stillImage.height;
+        const captureScale = Math.min(1, 1600 / sourceWidth);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(sourceWidth * captureScale));
+        canvas.height = Math.max(1, Math.round(sourceHeight * captureScale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) throw new Error('Canvas indisponível para processar a fotografia.');
+
+        ctx.drawImage(stillImage, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.93);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        setCapturedImage(dataUrl);
+        setLastRawImageData({ width: canvas.width, height: canvas.height, data: imageData.data });
+        stopCamera();
+        processImage(dataUrl, imageData.data, canvas.width, canvas.height);
+        return;
+      } catch (error) {
+        // ImageCapture is not implemented by every Android WebView. Keep the
+        // existing video-frame path as a safe compatibility fallback.
+        console.debug('High-quality camera still unavailable; using preview frame:', error);
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      }
+    }
+
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 480;
-    const ctx = canvas.getContext('2d');
+    const sourceWidth = video.videoWidth || 640;
+    const sourceHeight = video.videoHeight || 480;
+    const captureScale = Math.min(1, 1280 / sourceWidth);
+    canvas.width = Math.max(1, Math.round(sourceWidth * captureScale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * captureScale));
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
-    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
-    setCapturedImage(dataUrl);
-    stopCamera();
-
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    setCapturedImage(dataUrl);
     setLastRawImageData({ width: canvas.width, height: canvas.height, data: imageData.data });
-
+    stopCamera();
     processImage(dataUrl, imageData.data, canvas.width, canvas.height);
   };
 
@@ -219,8 +269,12 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         if (!ctx) return;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Process the normalized, upright canvas image rather than the raw file
+        // so Gemini and local CV inspect exactly the same pixels/orientation.
+        const normalizedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        setCapturedImage(normalizedDataUrl);
         setLastRawImageData({ width: canvas.width, height: canvas.height, data: imageData.data });
-        processImage(dataUrl, imageData.data, canvas.width, canvas.height);
+        processImage(normalizedDataUrl, imageData.data, canvas.width, canvas.height);
       };
       img.src = dataUrl;
     };
@@ -257,6 +311,8 @@ export const CameraTab: React.FC<CameraTabProps> = ({
         body: JSON.stringify({
           imageBase64: dataUrl,
           mode: engineMode,
+          width,
+          height,
         }),
       });
 
@@ -452,8 +508,9 @@ export const CameraTab: React.FC<CameraTabProps> = ({
 
   // Add a piece without depending on a previously detected result.
   const handleAddManualPiece = () => {
-    const sideA = Math.min(manualA, manualB);
-    const sideB = Math.max(manualA, manualB);
+    // Keep the entered order; side A and side B are not interchangeable.
+    const sideA = manualA;
+    const sideB = manualB;
     const newPiece: DetectedPiece = {
       id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sideA,
@@ -482,8 +539,9 @@ export const CameraTab: React.FC<CameraTabProps> = ({
   // Save individual piece editing
   const handleSavePieceEdit = (pieceId: string) => {
     if (!visionResult) return;
-    const a = Math.min(editSideA, editSideB);
-    const b = Math.max(editSideA, editSideB);
+    // Preserve the exact A/B order selected by the user.
+    const a = editSideA;
+    const b = editSideB;
 
     const updated = visionResult.pieces.map((p) => {
       if (p.id === pieceId) {

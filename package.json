@@ -11,6 +11,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:camera-regression": "node --test tests/camera-tab-regression.test.mjs",
+    "test:domino-vision": "tsx --test src/utils/dominoDetectorCV.test.ts src/utils/dominoDetectorCV.dataset.test.ts",
     "android:sync": "npm run build && cap sync android"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "jpeg-js": "^0.4.4"
   }
 }

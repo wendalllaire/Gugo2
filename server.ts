@@ -80,6 +80,8 @@ app.post('/api/analyze-dominoes', async (req: Request, res: Response): Promise<v
   const startTime = Date.now();
   try {
     const { imageBase64, mode = 'auto' } = req.body;
+    const frameWidth = Math.max(1, Number(req.body.width) || 1000);
+    const frameHeight = Math.max(1, Number(req.body.height) || 1000);
 
     if (!imageBase64) {
       res.status(400).json({ error: 'Nenhuma imagem foi fornecida.' });
@@ -99,20 +101,21 @@ app.post('/api/analyze-dominoes', async (req: Request, res: Response): Promise<v
 Analise a imagem da mesa e identifique e CATALOGUE TODAS AS PEÇAS DE DOMINÓ PRESENTES NA FOTO, UMA A UMA.
 
 REGRAS:
-1. Um conjunto de dominó mexicano Double-12 possui valores de 0 a 12 pips em cada metade ([0|0] até [12|12]).
-2. Se a foto contiver múltiplas peças, retorne cada uma como um item individual no array 'pieces'.
-3. Para cada peça detectada:
-   - sideA: menor número de pips (0 a 12)
-   - sideB: maior número de pips (0 a 12, com sideA <= sideB)
-   - points: a soma exata (sideA + sideB)
-   - label: "[sideA|sideB]"
-   - confidence: precisão de 0.8 a 1.0
-   - box2d: [ymin, xmin, ymax, xmax] normalizado 0 a 1000
-4. 'totalPoints': soma exata de todos os pontos.`;
+1. Um conjunto Double-12 contém valores de 0 a 12 pontos em cada metade ([0|0] até [12|12]).
+2. As peças podem ser brancas, marfim, cinzentas ou amarelas. Não exclua uma peça por causa da cor, de reflexos ou de sombras.
+3. Os pontos podem ser pretos, cinzentos/prateados, amarelos, laranja, vermelhos, azuis, roxos ou verdes. Conte cada ponto físico uma única vez, pelo seu contorno circular e posição; um brilho dentro do mesmo ponto não é outro ponto.
+4. Conte os pontos de CADA metade separadamente. Use a disposição regular dos pontos para distinguir 6, 8, 9, 10, 11 e 12; não estime a quantidade pela área escura total.
+5. Catalogue apenas peças físicas: cada uma é um retângulo alongado, aproximadamente 2:1, com duas metades separadas por uma linha central. As peças encostadas continuam a ser peças distintas.
+6. NÃO catalogue mãos, dedos, caixas, cartas, pratos, manchas, reflexos, sombras, padrões da mesa ou objetos fora da escala de uma peça.
+7. Devolva uma entrada por peça, sem fundir peças vizinhas. sideA e sideB devem ser inteiros entre 0 e 12; points é a soma; label é "[sideA|sideB]". Preserve a orientação da fotografia: A é esquerda/topo e B é direita/fundo.
+8. box2d=[ymin,xmin,ymax,xmax] normalizado entre 0 e 1000 deve envolver apenas uma peça. Não use uma caixa para duas peças.
+9. Se não existir evidência visual suficiente para uma peça, não invente essa peça. Devolva pieces vazio se não houver peças fiáveis.
+10. totalPoints é a soma exata de todos os pontos de todas as peças devolvidas.`;
 
-        // 4-second timeout to ensure instant fallback if network egress is slow
+        // Camera still photos can be larger and take longer to upload/infer.
+        // Allow a little more time before falling back to the on-device detector.
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 4000)
+          setTimeout(() => reject(new Error('timeout')), 15000)
         );
 
         const geminiCall = ai.models.generateContent({
@@ -131,6 +134,7 @@ REGRAS:
             ],
           },
           config: {
+            temperature: 0.1,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -148,10 +152,13 @@ REGRAS:
                       confidence: { type: Type.NUMBER },
                       box2d: {
                         type: Type.ARRAY,
+                        description: 'Coordenadas [ymin,xmin,ymax,xmax] normalizadas entre 0 e 1000, para UMA peça',
+                        minItems: 4,
+                        maxItems: 4,
                         items: { type: Type.INTEGER },
                       },
                     },
-                    required: ['sideA', 'sideB', 'points', 'label'],
+                    required: ['sideA', 'sideB', 'points', 'label', 'confidence', 'box2d'],
                   },
                 },
                 totalPoints: { type: Type.INTEGER },
@@ -166,18 +173,50 @@ REGRAS:
         const rawText = response.text;
         if (rawText) {
           const parsed = JSON.parse(rawText);
-          const pieces: DetectedPiece[] = (parsed.pieces || []).map((p: any, idx: number) => {
-            const min = Math.min(Number(p.sideA) || 0, Number(p.sideB) || 0);
-            const max = Math.max(Number(p.sideA) || 0, Number(p.sideB) || 0);
-            return {
+          const pieces: DetectedPiece[] = (parsed.pieces || []).flatMap((p: any, idx: number) => {
+            const rawA = Number(p.sideA);
+            const rawB = Number(p.sideB);
+            const box = Array.isArray(p.box2d) && p.box2d.length === 4 ? p.box2d.map(Number) : null;
+            if (!Number.isInteger(rawA) || !Number.isInteger(rawB) ||
+                rawA < 0 || rawA > 12 || rawB < 0 || rawB > 12 ||
+                !box || box.some((v: number) => !Number.isInteger(v) || v < 0 || v > 1000)) return [];
+
+            const [yMin, xMin, yMax, xMax] = box;
+            const boxWidth = xMax - xMin;
+            const boxHeight = yMax - yMin;
+            const pixelX = xMin * frameWidth / 1000;
+            const pixelY = yMin * frameHeight / 1000;
+            const pixelWidth = boxWidth * frameWidth / 1000;
+            const pixelHeight = boxHeight * frameHeight / 1000;
+            const shortSide = Math.min(pixelWidth, pixelHeight);
+            const longSide = Math.max(pixelWidth, pixelHeight);
+            const areaFraction = (boxWidth * boxHeight) / 1000000;
+            const aspect = longSide / Math.max(1, shortSide);
+            const minFrameSide = Math.min(frameWidth, frameHeight);
+            const maxFrameSide = Math.max(frameWidth, frameHeight);
+            const frameMargin = Math.max(2, minFrameSide * 0.006);
+            const staysInsideFrame =
+              pixelX >= frameMargin && pixelY >= frameMargin &&
+              pixelX + pixelWidth <= frameWidth - frameMargin &&
+              pixelY + pixelHeight <= frameHeight - frameMargin;
+            const confidence = Number(p.confidence ?? 0.8);
+            // Filter tiny reflections, edge-clipped regions and oversized objects.
+            if (xMax <= xMin || yMax <= yMin || !staysInsideFrame ||
+                shortSide < Math.max(16, minFrameSide * 0.032) ||
+                longSide < Math.max(32, minFrameSide * 0.06) ||
+                longSide > maxFrameSide * 0.42 ||
+                areaFraction < 0.002 || areaFraction > 0.06 ||
+                aspect < 1.35 || aspect > 2.75 || confidence < 0.55) return [];
+
+            return [{
               id: `gemini-tile-${Date.now()}-${idx}`,
-              sideA: min,
-              sideB: max,
-              points: min + max,
-              label: p.label || `[${min}|${max}]`,
-              confidence: p.confidence || 0.98,
-              box2d: Array.isArray(p.box2d) && p.box2d.length === 4 ? p.box2d : undefined,
-            };
+              sideA: rawA,
+              sideB: rawB,
+              points: rawA + rawB,
+              label: `[${rawA}|${rawB}]`,
+              confidence: Math.min(1, confidence),
+              box2d: box,
+            }];
           });
 
           pieces.sort((a, b) => b.points - a.points);
