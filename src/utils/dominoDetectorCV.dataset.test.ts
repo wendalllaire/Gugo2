@@ -285,10 +285,11 @@ function cropTileFromSequence(
   const y = Math.max(0, Math.floor(box.y * scaleY));
   const width = Math.min(image.width - x, Math.ceil(box.width * scaleX));
   const height = Math.min(image.height - y, Math.ceil(box.height * scaleY));
-  // Keep neighbouring tiles out of the isolated sample, but restore a dark
-  // contrasting surround so Otsu/body segmentation sees the complete tile.
-  const padX = Math.max(12, Math.round(width * 0.12));
-  const padY = Math.max(12, Math.round(height * 0.12));
+  // Keep neighbouring tiles out, then add enough dark surround for the isolated
+  // tile to occupy less than half the frame. The detector intentionally rejects
+  // near-full-frame bright regions as backgrounds rather than domino bodies.
+  const padX = Math.max(16, Math.round(width * 0.28));
+  const padY = Math.max(16, Math.round(height * 0.28));
   const cropWidth = width + padX * 2;
   const cropHeight = height + padY * 2;
   const background = [image.data[0], image.data[1], image.data[2], 255];
