@@ -757,7 +757,7 @@ function hasDominoDivider(
 
 /** Rejoins the two nearly-square face components when a black divider
  * separates the halves completely in the binary body mask. */
-function mergeAdjacentBodyComponents(
+export function mergeAdjacentBodyComponents(
   blobs: ComponentBlob[],
   gray: Uint8Array,
   width: number,
