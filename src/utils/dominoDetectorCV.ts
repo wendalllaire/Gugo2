@@ -705,7 +705,7 @@ function isPlausibleDominoBodyBox(
     bbox.x + bbox.width <= frameWidth - margin &&
     bbox.y + bbox.height <= frameHeight - margin;
   return inside &&
-    areaFraction >= 0.01 && areaFraction <= 0.42 &&
+    areaFraction >= 0.01 && areaFraction <= 0.48 &&
     shortSide >= Math.max(20, frameShort * 0.055) &&
     longSide >= Math.max(40, frameShort * 0.10) &&
     longSide <= frameLong * 0.94 &&
