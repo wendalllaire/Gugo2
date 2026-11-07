@@ -13,6 +13,7 @@ import {
   buildAdaptivePipMask,
   buildYellowPipMask,
   buildChromaticPipMask,
+  detectColorRegionsInHalf,
   buildNeutralDominoBodyMask,
   splitMergedBodyComponents,
   DetectedPip,
@@ -454,4 +455,38 @@ test('domino geometry filter rejects tiny and oversized objects but accepts a ti
   assert.equal(isPlausibleDominoBox({ x: 500, y: 600, width: 200, height: 100 }, 1280, 1707), true);
   assert.equal(isPlausibleDominoBox({ x: 100, y: 100, width: 520, height: 300 }, 1280, 1707), false,
     'a merged multi-piece/table region must not pass as one domino');
+});
+
+
+test('colour-region counting detects coloured marks without requiring circular pips', () => {
+  const width = 180;
+  const height = 100;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = 238;
+    rgba[i * 4 + 1] = 235;
+    rgba[i * 4 + 2] = 229;
+    rgba[i * 4 + 3] = 255;
+  }
+  const paint = (x0: number, y0: number, x1: number, y1: number, color: [number, number, number]) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4;
+      rgba[i] = color[0]; rgba[i + 1] = color[1]; rgba[i + 2] = color[2];
+    }
+  };
+  // Two yellow circular marks and one compact, deliberately non-circular blue mark.
+  paint(25, 25, 36, 36, [220, 178, 18]);
+  paint(65, 55, 76, 66, [220, 178, 18]);
+  paint(115, 35, 128, 43, [35, 125, 190]);
+
+  const regions = detectColorRegionsInHalf(rgba, width, height, {
+    x: 0, y: 0, width, height,
+  });
+  assert.equal(regions.length, 3, `Expected 3 colour regions, got ${regions.length}`);
+  assert.ok(regions.some(region => region.x > 115 && region.x < 128),
+    'the compact rectangular blue mark must be counted by colour');
+  const outside = detectColorRegionsInHalf(rgba, width, height, {
+    x: 0, y: 0, width: 80, height: 100,
+  });
+  assert.equal(outside.length, 2, 'regions outside the physical half must not be counted');
 });
