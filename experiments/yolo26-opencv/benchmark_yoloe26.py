@@ -155,9 +155,9 @@ def main() -> int:
         # Match the exact labelled-sample naming convention. In particular,
         # exclude Stagnation Lab screenshots and annotated reference images:
         # their timestamps contain number pairs that look like domino labels.
-        labelled_sample = re.match(r"^\\d{1,2}-\\d{1,2}(?:\\s|\\.jpe?g$)", name, re.IGNORECASE)
+        labelled_sample = re.match(r"^\d{1,2}-\d{1,2}(?:\s|\.jpe?g$)", name, re.IGNORECASE)
         is_reference = name == "IMG_20261102_231406.jpg"
-        is_sequence = re.fullmatch(r"Todas peças v[12]\\.jpg", name, re.IGNORECASE)
+        is_sequence = re.fullmatch(r"Todas peças v[12]\.jpg", name, re.IGNORECASE)
         if labelled_sample or is_reference or is_sequence:
             paths.append(path)
 
