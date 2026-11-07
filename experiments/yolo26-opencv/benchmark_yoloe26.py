@@ -66,19 +66,26 @@ def resize_like_app(image: np.ndarray, max_side: int = 1280) -> np.ndarray:
 
 
 def get_predictions(model: YOLOE, image: np.ndarray, reference_path: Path,
-                    reference_box: list[float], conf: float, imgsz: int):
-    result = model.predict(
-        source=image,
-        refer_image=str(reference_path),
-        visual_prompts={
-            "bboxes": np.asarray([reference_box], dtype=np.float32),
-            "cls": np.asarray([0], dtype=np.int64),
-        },
-        conf=conf,
-        imgsz=imgsz,
-        retina_masks=True,
-        verbose=False,
-    )[0]
+                    reference_boxes: list[list[float]], prompt_mode: str,
+                    conf: float, imgsz: int):
+    kwargs = {
+        "source": image,
+        "conf": conf,
+        "imgsz": imgsz,
+        "retina_masks": True,
+        "verbose": False,
+    }
+    if prompt_mode == "text-domino":
+        # Text prompts are configured once before the benchmark loop.
+        pass
+    else:
+        # All visual exemplars share class 0: "domino tile".
+        kwargs["refer_image"] = str(reference_path)
+        kwargs["visual_prompts"] = {
+            "bboxes": np.asarray(reference_boxes, dtype=np.float32),
+            "cls": np.zeros(len(reference_boxes), dtype=np.int64),
+        }
+    result = model.predict(**kwargs)[0]
     if result.masks is None or result.boxes is None:
         return []
 
@@ -135,9 +142,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--samples", type=Path, default=Path("public/samples"))
     parser.add_argument("--reference-image", type=Path,
-                        default=Path("public/samples/0-10.jpg"))
+                        default=Path("public/samples/IMG_20261102_231406.jpg"))
     parser.add_argument("--reference-box", type=float, nargs=4,
                         default=[40, 155, 515, 400], metavar=("X1", "Y1", "X2", "Y2"))
+    parser.add_argument("--prompt-mode", choices=["visual-single", "visual-multi", "text-domino"],
+                        default="visual-multi")
     parser.add_argument("--output", type=Path, default=Path("artifacts/yolo26-opencv"))
     parser.add_argument("--model", default="yoloe-26s-seg.pt")
     parser.add_argument("--conf", type=float, default=0.12)
@@ -146,10 +155,25 @@ def main() -> int:
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
-    if not args.reference_image.is_file():
+    if args.prompt_mode != "text-domino" and not args.reference_image.is_file():
         raise SystemExit(f"Visual-prompt reference not found: {args.reference_image}")
 
+    if args.prompt_mode == "visual-multi":
+        # Reference photograph is 3072x4096. Three independent examples show
+        # vertical tiles, neutral/black pips, a blue pip and yellow/grey pips.
+        reference_boxes = [
+            [600, 1320, 1550, 3100],
+            [1470, 1320, 2460, 3180],
+            [2440, 1390, 3530, 3250],
+        ]
+    elif args.prompt_mode == "visual-single":
+        reference_boxes = [args.reference_box]
+    else:
+        reference_boxes = []
+
     model = YOLOE(args.model)
+    if args.prompt_mode == "text-domino":
+        model.set_classes(["domino tile"])
     paths = []
     for path in sorted(args.samples.glob("*.jpg")):
         name = path.name
@@ -170,7 +194,7 @@ def main() -> int:
                      expected_physical: list[tuple[int, int]] | None = None,
                      annotate: bool = False) -> None:
         reads = get_predictions(model, image, args.reference_image,
-                                args.reference_box, args.conf, args.imgsz)
+                                reference_boxes, args.prompt_mode, args.conf, args.imgsz)
         actual = [(r.side_a, r.side_b) for r in reads]
         result = evaluate_pair_list(expected, actual)
         if strict_order:
@@ -235,8 +259,9 @@ def main() -> int:
     summary = {
         "model": args.model,
         "engine": "YOLOE-26 instance segmentation + OpenCV rectification, components and Hough circles",
-        "prompt": {"mode": "visual", "reference": args.reference_image.name,
-                   "reference_box_xyxy": args.reference_box},
+        "prompt": {"mode": args.prompt_mode, "reference": args.reference_image.name,
+                   "reference_boxes_xyxy": reference_boxes,
+                   "text_classes": ["domino tile"] if args.prompt_mode == "text-domino" else []},
         "images_tested": len(records),
         "images_passed": passed,
         "images_failed": len(records) - passed,
