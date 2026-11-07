@@ -5,6 +5,12 @@ on:
     branches:
       - experiment/yolo26-opencv
   workflow_dispatch:
+    inputs:
+      include_transforms:
+        description: "Run the extended rotation/exposure/saturation regression set"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,16 +47,20 @@ jobs:
           PYTHONPATH: experiments/yolo26-opencv
         run: python -m unittest discover -s experiments/yolo26-opencv/tests -v
 
-      - name: Run full YOLOE-26 vision regression benchmark
+      - name: Run YOLOE-26 vision benchmark
         env:
           PYTHONUNBUFFERED: '1'
         run: |
           mkdir -p artifacts/yolo26-opencv
+          ARGS=()
+          if [ "${{ inputs.include_transforms }}" = "true" ]; then
+            ARGS+=(--include-transforms)
+          fi
           python experiments/yolo26-opencv/benchmark_yoloe26.py \
             --samples public/samples \
             --reference-image public/samples/0-10.jpg \
             --reference-box 40 155 515 400 \
-            --include-transforms \
+            "${ARGS[@]}" \
             --output artifacts/yolo26-opencv 2>&1 | tee artifacts/yolo26-opencv/benchmark.log
 
       - name: Upload YOLOE-26 benchmark results and annotated samples
