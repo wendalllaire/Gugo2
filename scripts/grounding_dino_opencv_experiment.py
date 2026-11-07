@@ -82,7 +82,7 @@ def infer_image(path, model, processor, args):
         outputs = model(**inputs)
     result = processor.post_process_grounded_object_detection(
         outputs,
-        inputs.input_ids,
+        inputs["input_ids"],
         threshold=args.box_threshold,
         text_threshold=args.text_threshold,
         target_sizes=[(height, width)],
