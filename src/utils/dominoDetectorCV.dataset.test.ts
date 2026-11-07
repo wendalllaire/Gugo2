@@ -292,7 +292,7 @@ function cropTileFromSequence(
   const padY = Math.max(16, Math.round(height * 0.28));
   const cropWidth = width + padX * 2;
   const cropHeight = height + padY * 2;
-  const background = [image.data[0], image.data[1], image.data[2], 255];
+  // Use a consistent dark-felt surround so the isolated tile has a clear body boundary.\n  const background = [24, 34, 28, 255];
   const data = new Uint8Array(cropWidth * cropHeight * 4);
 
   for (let i = 0; i < cropWidth * cropHeight; i++) {
