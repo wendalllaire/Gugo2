@@ -1039,7 +1039,7 @@ export function detectColorRegionsInHalf(
   }
 
   const minArea = Math.max(4, width * height * 0.000035);
-  const maxArea = Math.max(minArea + 1, Math.min(width * height * 0.018, width * height * 0.004));
+  const maxArea = Math.max(minArea + 1, Math.min(width * height * 0.05, Math.min(width, height) ** 2 * 0.12));
   const blobs = findConnectedComponents(raw, width, height, minArea, maxArea);
   const minDimension = Math.min(width, height);
   const maxRegionDimension = Math.max(5, minDimension * 0.30);
